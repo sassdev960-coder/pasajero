@@ -1,0 +1,6 @@
+{
+  "name": "Moto Móvil El Campeón",
+  "description": "Aplicación de transporte en moto con cálculo de rutas de alta fidelidad, tarifas claras en tiempo real y asignación directa de conductores.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
