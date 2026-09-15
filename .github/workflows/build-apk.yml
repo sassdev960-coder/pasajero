@@ -19,11 +19,11 @@ jobs:
         with:
           node-version: '22'
 
-      - name: ☕ Setup Java 17
+      - name: ☕ Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: 🤖 Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -51,7 +51,7 @@ jobs:
       - name: 🔓 Añadir permisos al AndroidManifest
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          sed -i '/<application/i\    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />' $MANIFEST
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />' $MANIFEST
           echo "✅ Permisos añadidos"
 
       - name: 🔨 Compilar APK
