@@ -14,10 +14,10 @@ jobs:
       - name: 📥 Checkout código
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node.js 20
+      - name: 🟢 Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: ☕ Setup Java 17
         uses: actions/setup-java@v4
@@ -34,7 +34,7 @@ jobs:
       - name: 📦 Instalar dependencias npm
         run: npm install --legacy-peer-deps
 
-      - name: 📱 Instalar Capacitor (si no está en package.json)
+      - name: 📱 Instalar Capacitor
         run: npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest @capacitor/geolocation@latest --legacy-peer-deps
 
       - name: 🏗️ Compilar app web (Vite)
