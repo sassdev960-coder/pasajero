@@ -34,6 +34,9 @@ jobs:
       - name: 📦 Instalar dependencias npm
         run: npm install --legacy-peer-deps
 
+      - name: 📱 Instalar Capacitor (si no está en package.json)
+        run: npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest @capacitor/geolocation@latest --legacy-peer-deps
+
       - name: 🏗️ Compilar app web (Vite)
         run: npm run build
         env:
