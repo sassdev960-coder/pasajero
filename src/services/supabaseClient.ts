@@ -341,51 +341,38 @@ export async function createRideInSupabase(rideData: {
       phone: rideData.passengerPhone
     });
 
-    const payload: any = {
-      origin_lat: rideData.origin.lat,
-      origin_lng: rideData.origin.lng,
-      origin_address: rideData.originAddress,
-      destination_lat: rideData.destination.lat,
-      destination_lng: rideData.destination.lng,
-      destination_address: rideData.destinationAddress,
-      pickup_lat: rideData.origin.lat,
-      pickup_lng: rideData.origin.lng,
-      dropoff_lat: rideData.destination.lat,
-      dropoff_lng: rideData.destination.lng,
-      distance_km: rideData.distanceKm,
-      duration_minutes: Math.round(rideData.durationMins),
-      price: rideData.price,
-      status: 'pendiente',
-      has_cargo: rideData.hasCargo,
-      cargo_description: rideData.cargoDescription || null,
-      cargo_photo_url: rideData.cargoPhotoUrl || null,
-      passenger_name: rideData.passengerName || null,
-      passenger_phone: rideData.passengerPhone || null
-    };
+    console.log('📤 [RIDE] Creando vía RPC, passengerId:', passengerId);
 
-    if (passengerId) payload.passenger_id = passengerId;
-
-    console.log('📤 [SUPABASE] Insertando ride:', payload);
-
-    const { data, error } = await client.from('rides').insert(payload).select().single();
+    const { data, error } = await client.rpc('create_ride_for_passenger', {
+      p_passenger_id: passengerId,
+      p_origin_lat: rideData.origin.lat,
+      p_origin_lng: rideData.origin.lng,
+      p_origin_address: rideData.originAddress,
+      p_destination_lat: rideData.destination.lat,
+      p_destination_lng: rideData.destination.lng,
+      p_destination_address: rideData.destinationAddress,
+      p_distance_km: rideData.distanceKm,
+      p_duration_minutes: Math.round(rideData.durationMins),
+      p_price: rideData.price,
+      p_has_cargo: rideData.hasCargo,
+      p_cargo_description: rideData.cargoDescription || null,
+      p_cargo_photo_url: rideData.cargoPhotoUrl || null,
+      p_passenger_name: rideData.passengerName || null,
+      p_passenger_phone: rideData.passengerPhone || null
+    });
 
     if (error) {
-      console.error('❌ Error insertando ride:', error);
-      if (error.code === '23503' && payload.passenger_id) {
-        delete payload.passenger_id;
-        const retry = await client.from('rides').insert(payload).select().single();
-        if (!retry.error) return { ride: retry.data as SupabaseRide, error: null };
-      }
+      console.error('❌ [RIDE] Error en RPC:', error);
       return { ride: null, error: error.message };
     }
 
-    console.log('✅ Ride creado:', data.id);
+    console.log('✅ [RIDE] Creado:', (data as any)?.id);
     return { ride: data as SupabaseRide, error: null };
   } catch (err: any) {
+    console.error('❌ [RIDE] Excepción:', err);
     return { ride: null, error: err.message };
   }
 }
-
 // ═══════════════════════════════════════════════════════════════
 // CONDUCTORES — Consultas vía RPC (no expone tabla drivers)
 // ═══════════════════════════════════════════════════════════════
