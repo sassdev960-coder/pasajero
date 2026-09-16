@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Database, CheckCircle, AlertCircle, RefreshCw, Key, Link as LinkIcon, Users, Bike, Shield } from 'lucide-react';
-import { getSupabaseCredentials, updateSupabaseCredentials, testSupabaseConnection, isSupabaseConfigured, getActiveDrivers } from '../services/supabaseClient';
+import { getSupabaseCredentials, updateSupabaseCredentials, testSupabaseConnection, isSupabaseConfigured, getOnlineDrivers } from '../services/supabaseClient';
 import { SupabaseDriver } from '../types';
 
 interface SupabaseModalProps {
@@ -42,8 +42,11 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
     setIsTesting(false);
 
     if (res.success) {
-      const activeDrivers = await getActiveDrivers();
-      setDrivers(activeDrivers);
+      // ✅ Reemplazo: ya no usamos getActiveDrivers (RLS bloquea la tabla drivers).
+      // Usamos getOnlineDrivers que va por RPC segura.
+      const onlineDrivers = await getOnlineDrivers();
+      setDrivers(onlineDrivers);
+      setTestResult({ ...res, driversCount: onlineDrivers.length });
     }
   };
 
@@ -118,7 +121,7 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
                 <div className="font-bold">{testResult.message}</div>
                 {testResult.success && (
                   <div className="text-[11px] text-emerald-400/90 mt-0.5">
-                    Conductores registrados encontrados: <b>{testResult.driversCount ?? 0}</b>
+                    Conductores en línea detectados: <b>{testResult.driversCount ?? 0}</b>
                   </div>
                 )}
               </div>
@@ -216,8 +219,8 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
                 <span className="text-slate-400">Ubicación GPS en vivo del conductor</span>
               </div>
               <div className="p-2 rounded-xl bg-slate-900/80 border border-slate-800">
-                <span className="font-mono text-purple-400 font-bold block">Supabase Realtime</span>
-                <span className="text-slate-400">Notificaciones automáticas al aceptar carrera</span>
+                <span className="font-mono text-purple-400 font-bold block">RPCs seguras</span>
+                <span className="text-slate-400">Consultas sin exponer tablas directamente</span>
               </div>
             </div>
           </div>
@@ -227,7 +230,7 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({
             <div className="bg-slate-950/40 p-3.5 rounded-2xl border border-slate-800 space-y-2 text-xs">
               <div className="font-bold text-slate-200 flex items-center gap-1.5">
                 <Bike className="w-4 h-4 text-amber-400" />
-                Conductores Activos en Base de Datos ({drivers.length})
+                Conductores en Línea Ahora ({drivers.length})
               </div>
               <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
                 {drivers.map(d => (
