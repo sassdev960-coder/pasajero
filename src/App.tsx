@@ -1,3 +1,4 @@
+import { DebugConsole } from './components/DebugConsole';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LatLng, PointOfInterest, RideRequest, Driver, PricingConfig, SupabaseDriver, SupabasePassenger, DriverViewInfo } from './types';
 import { calculateRoute, calculateFare } from './services/routingService';
@@ -875,6 +876,9 @@ export default function App() {
         onRepeatRide={handleRepeatRide}
         localHistory={history}
       />
+
+      {/* ✅ AGREGAR ESTA LÍNEA */}
+      <DebugConsole />
     </div>
   );
 }
