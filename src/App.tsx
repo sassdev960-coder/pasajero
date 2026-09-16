@@ -28,8 +28,8 @@ import {
   getCachedPricingConfig,
   subscribeToOnlineDrivers,
   markRideAsViewedInSupabase,
-  submitDriverRating,        // ⚡ NUEVO
-  uploadCargoPhoto           // ⚡ NUEVO
+  submitDriverRating,
+  uploadCargoPhoto
 } from './services/supabaseClient';
 import { Navigation, CheckCircle2, ShieldCheck, RefreshCw } from 'lucide-react';
 
@@ -65,7 +65,7 @@ export default function App() {
   const [hasCargo, setHasCargo] = useState(false);
   const [cargoDescription, setCargoDescription] = useState('');
   const [cargoPhotoUrl, setCargoPhotoUrl] = useState<string | null>(null);
-  const [cargoPhotoFile, setCargoPhotoFile] = useState<File | null>(null); // ⚡ NUEVO
+  const [cargoPhotoFile, setCargoPhotoFile] = useState<File | null>(null);
 
   const [activeRide, setActiveRide] = useState<RideRequest | null>(null);
   const [isSubmittingRide, setIsSubmittingRide] = useState(false);
@@ -375,7 +375,7 @@ export default function App() {
 
     let rideId = 'ride-' + Date.now();
 
-    // ⚡ NUEVO: subir foto de bulto a Storage antes de crear el ride
+    // Subir foto de bulto a Storage antes de crear el ride
     let finalCargoPhotoUrl: string | undefined = undefined;
     if (hasCargo && cargoPhotoFile && isSupabaseConfigured()) {
       const tempId = rideId;
@@ -530,7 +530,7 @@ export default function App() {
     setStatusNotification('🚀 ¡Viaje en curso!');
     setTimeout(() => setStatusNotification(null), 3500);
 
-    if (activeRide && isSupabaseConfigured()) updateRideStatusInSupabase(activeRide.id, 'en_curso');
+    // ❌ NO actualizamos el estado del ride acá. El conductor es quien lo hace.
 
     if (driverMovementTimerRef.current) clearInterval(driverMovementTimerRef.current);
 
@@ -586,7 +586,13 @@ export default function App() {
     setDriverDistanceMeters(0);
 
     if (activeRide && isSupabaseConfigured()) {
-      updateRideStatusInSupabase(activeRide.id, 'cancelado', 'Cancelado por el usuario');
+      // ✅ Ahora pasamos passengerId → la RPC valida autorización
+      updateRideStatusInSupabase(
+        activeRide.id,
+        'cancelado',
+        'Cancelado por el usuario',
+        currentPassenger?.id
+      );
     }
     if (rideSubRef.current) {
       rideSubRef.current();
@@ -608,7 +614,10 @@ export default function App() {
     setDriverRouteCoords([]);
     setDriverDistanceMeters(0);
 
-    if (activeRide && isSupabaseConfigured()) updateRideStatusInSupabase(activeRide.id, 'completado');
+    // ❌ NO llamamos a updateRideStatusInSupabase acá.
+    // El conductor es quien marca el ride como 'completado' desde su app.
+    // El pasajero solo recibe el evento y muestra el modal de pago.
+
     if (rideSubRef.current) {
       rideSubRef.current();
       rideSubRef.current = null;
@@ -628,12 +637,11 @@ export default function App() {
   };
 
   // ═══════════════════════════════════════════════════════════════
-  // ENVIAR RATING (PATCH: ahora sí guarda en driver_ratings)
+  // ENVIAR RATING
   // ═══════════════════════════════════════════════════════════════
   const handleSubmitRating = async (rating: number) => {
     setIsRatingOpen(false);
 
-    // ⚡ NUEVO: guardar rating en Supabase
     if (activeRide && assignedDriver && isSupabaseConfigured()) {
       const result = await submitDriverRating(
         activeRide.id,
@@ -785,9 +793,8 @@ export default function App() {
           onToggleCargo={setHasCargo}
           onChangeCargoDesc={setCargoDescription}
           onUploadCargoPhoto={(file) => {
-            // ⚡ NUEVO: guardar el File para subir a Storage al crear el ride
             setCargoPhotoFile(file);
-            setCargoPhotoUrl(URL.createObjectURL(file)); // preview local
+            setCargoPhotoUrl(URL.createObjectURL(file));
           }}
           pricingConfig={pricingConfig}
           onRequestRide={handleRequestRide}
