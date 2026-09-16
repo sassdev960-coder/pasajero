@@ -113,10 +113,13 @@ export async function registerPassenger(
     return { passenger: null, error: 'Por favor completa todos los campos.' };
   }
 
+  // Sin Supabase → solo localStorage
   if (!client) {
     const localPassenger: SupabasePassenger = {
       id: 'local-pass-' + Date.now(),
-      phone: cleanPhone, full_name: cleanName, ci: cleanCi,
+      phone: cleanPhone,
+      full_name: cleanName,
+      ci: cleanCi,
       created_at: new Date().toISOString()
     };
     setCurrentPassenger(localPassenger);
@@ -124,31 +127,81 @@ export async function registerPassenger(
   }
 
   try {
-    const { data: existing } = await client
-      .from('passengers').select('*')
-      .or(`phone.eq.${cleanPhone},ci.eq.${cleanCi}`).limit(1);
+    // 1) ¿Ya existe por phone o ci?
+    const { data: existing, error: selErr } = await client
+      .from('passengers')
+      .select('*')
+      .or(`phone.eq.${cleanPhone},ci.eq.${cleanCi}`)
+      .limit(1);
 
+    if (selErr) {
+      console.warn('[registerPassenger] error buscando existente:', selErr.message);
+    }
+
+    // 2) Si existe → UPDATE
     if (existing && existing.length > 0) {
       const found = existing[0] as SupabasePassenger;
-      const { data: updated } = await client
+
+      const { data: updated, error: updErr } = await client
         .from('passengers')
         .update({ full_name: cleanName, phone: cleanPhone, ci: cleanCi })
-        .eq('id', found.id).select().single();
-      const result = (updated as SupabasePassenger) || found;
+        .eq('id', found.id)
+        .select()
+        .single();
+
+      // ✅ FIX: no mentir. Si falla, devolver el error real.
+      if (updErr || !updated) {
+        console.warn('[registerPassenger] update falló:', {
+          message: updErr?.message,
+          code: updErr?.code
+        });
+
+        // Si es duplicado, avisar al usuario
+        if (updErr?.code === '23505') {
+          return {
+            passenger: null,
+            error: 'Ese CI o teléfono ya está asociado a otro usuario.'
+          };
+        }
+
+        // Si es otro error, caer al pasajero existente sin romper el flujo
+        setCurrentPassenger(found);
+        return { passenger: found, error: null };
+      }
+
+      const result = updated as SupabasePassenger;
       setCurrentPassenger(result);
       return { passenger: result, error: null };
     }
 
-    const { data: created, error } = await client
+    // 3) No existe → INSERT
+    const { data: created, error: insErr } = await client
       .from('passengers')
       .insert({ full_name: cleanName, phone: cleanPhone, ci: cleanCi })
-      .select().single();
+      .select()
+      .single();
 
-    if (error) {
-      console.error('Supabase passenger registration error:', error);
+    if (insErr || !created) {
+      console.error('[registerPassenger] error en insert:', {
+        message: insErr?.message,
+        code: insErr?.code,
+        hint: insErr?.hint
+      });
+
+      // ✅ FIX: si es duplicado, mensaje claro
+      if (insErr?.code === '23505') {
+        return {
+          passenger: null,
+          error: 'Ese CI o teléfono ya está registrado. Intenta iniciar sesión.'
+        };
+      }
+
+      // Fallback local para no bloquear al usuario
       const fallback: SupabasePassenger = {
-        id: 'local-' + Date.now(), phone: cleanPhone,
-        full_name: cleanName, ci: cleanCi,
+        id: 'local-' + Date.now(),
+        phone: cleanPhone,
+        full_name: cleanName,
+        ci: cleanCi,
         created_at: new Date().toISOString()
       };
       setCurrentPassenger(fallback);
@@ -159,6 +212,7 @@ export async function registerPassenger(
     setCurrentPassenger(newPassenger);
     return { passenger: newPassenger, error: null };
   } catch (err: any) {
+    console.error('[registerPassenger] excepción:', err);
     return { passenger: null, error: err.message || 'Error al registrar.' };
   }
 }
@@ -229,25 +283,56 @@ export async function updatePassengerProfile(
 
   const current = getCurrentPassenger();
   const updated: SupabasePassenger = {
-    id: passengerId, full_name: cleanName, phone: cleanPhone, ci: cleanCi,
+    id: passengerId,
+    full_name: cleanName,
+    phone: cleanPhone,
+    ci: cleanCi,
     created_at: current?.created_at || new Date().toISOString()
   };
 
-  setCurrentPassenger(updated);
-  if (!client) return { success: true, passenger: updated };
+  // Sin cliente → solo localStorage
+  if (!client) {
+    setCurrentPassenger(updated);
+    return { success: true, passenger: updated };
+  }
 
   try {
     const { data, error } = await client
       .from('passengers')
       .update({ full_name: cleanName, phone: cleanPhone, ci: cleanCi })
-      .eq('id', passengerId).select().single();
+      .eq('id', passengerId)
+      .select()
+      .single();
 
-    if (error) return { success: true, passenger: updated };
-    const final = (data as SupabasePassenger) || updated;
+    // ✅ FIX: reportar el error real en vez de mentir con success:true
+    if (error || !data) {
+      console.error('[updatePassengerProfile] RLS/DB rechazó el update:', {
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint
+      });
+
+      // Si es duplicado de CI o phone, mensaje específico
+      if (error?.code === '23505') {
+        return {
+          success: false,
+          error: 'Ese CI o teléfono ya está registrado por otro pasajero.'
+        };
+      }
+
+      return {
+        success: false,
+        error: `No se pudo guardar: ${error?.message || 'respuesta vacía'}`
+      };
+    }
+
+    const final = data as SupabasePassenger;
     setCurrentPassenger(final);
     return { success: true, passenger: final };
-  } catch {
-    return { success: true, passenger: updated };
+  } catch (err: any) {
+    console.error('[updatePassengerProfile] excepción:', err);
+    return { success: false, error: err.message || 'Error de red.' };
   }
 }
 
