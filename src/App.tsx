@@ -1,4 +1,3 @@
-import { DebugConsole } from './components/DebugConsole';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LatLng, PointOfInterest, RideRequest, Driver, PricingConfig, SupabaseDriver, SupabasePassenger, DriverViewInfo } from './types';
 import { calculateRoute, calculateFare } from './services/routingService';
@@ -17,22 +16,20 @@ import { AnalysisModal } from './components/AnalysisModal';
 import { CityPickerModal, CityOption } from './components/CityPickerModal';
 import { SupabaseModal } from './components/SupabaseModal';
 import { PassengerModal } from './components/PassengerModal';
+import { DebugConsole } from './components/DebugConsole';
 import { 
   isSupabaseConfigured, 
   createRideInSupabase, 
   subscribeToRideChanges, 
   updateRideStatusInSupabase, 
-  acceptRideAsDriverInSupabase,
   getCurrentPassenger,
   fetchPricingConfigFromSupabase,
   subscribeToPricingConfig,
   getCachedPricingConfig,
   subscribeToOnlineDrivers,
-  markRideAsViewedInSupabase,
   submitDriverRating,
   uploadCargoPhoto
 } from './services/supabaseClient';
-import { Navigation, CheckCircle2, ShieldCheck, RefreshCw } from 'lucide-react';
 
 const DEFAULT_CENTER: LatLng = { lat: -17.7833, lng: -63.1821 };
 
@@ -77,7 +74,6 @@ export default function App() {
   const [driverRouteCoords, setDriverRouteCoords] = useState<[number, number][]>([]);
   const [driverDistanceMeters, setDriverDistanceMeters] = useState<number>(0);
   const [isSheetMinimized, setIsSheetMinimized] = useState(false);
-  const driverMovementTimerRef = useRef<any>(null);
 
   const [onlineDrivers, setOnlineDrivers] = useState<SupabaseDriver[]>([]);
   const [viewedDrivers, setViewedDrivers] = useState<DriverViewInfo[]>([]);
@@ -363,7 +359,7 @@ export default function App() {
   };
 
   // ═══════════════════════════════════════════════════════════════
-  // CREAR RIDE (incluye upload de foto de bulto a Storage)
+  // CREAR RIDE
   // ═══════════════════════════════════════════════════════════════
   const handleRequestRide = async (rideType: 'moto' | 'express' = 'moto', customPrice?: number) => {
     if (!origin || !destination) return;
@@ -376,7 +372,6 @@ export default function App() {
 
     let rideId = 'ride-' + Date.now();
 
-    // Subir foto de bulto a Storage antes de crear el ride
     let finalCargoPhotoUrl: string | undefined = undefined;
     if (hasCargo && cargoPhotoFile && isSupabaseConfigured()) {
       const tempId = rideId;
@@ -423,34 +418,58 @@ export default function App() {
         if (rideSubRef.current) rideSubRef.current();
 
         const unsub = subscribeToRideChanges(dbRide.id, (updatedRide, driverInfo, newViewedDrivers) => {
-          if (newViewedDrivers && newViewedDrivers.length > 0) setViewedDrivers(newViewedDrivers);
+          if (newViewedDrivers) setViewedDrivers(newViewedDrivers);
 
           if (updatedRide.status === 'aceptado') {
             setRideStatus(prev => {
-              if (prev === 'solicitando') {
-                const driverLat = Number(driverInfo?.lat);
-                const driverLng = Number(driverInfo?.lng);
-                const baseLat = (!isNaN(driverLat) && isFinite(driverLat)) ? driverLat : (origin?.lat || DEFAULT_CENTER.lat);
-                const baseLng = (!isNaN(driverLng) && isFinite(driverLng)) ? driverLng : (origin?.lng || DEFAULT_CENTER.lng);
+              // Solo procesar si no estamos ya en camino
+              if (prev !== 'solicitando' && prev !== 'asignado') return prev;
 
-                const mappedDriver: Driver = {
-                  id: driverInfo?.id || updatedRide.driver_id || 'drv-assigned',
-                  name: driverInfo?.full_name || 'Conductor Moto Móvil',
-                  rating: 5.0, ridesCount: 150,
-                  vehicle: driverInfo?.vehicle_model || 'Motocicleta',
-                  plate: driverInfo?.vehicle_plate || 'SCZ',
-                  phone: driverInfo?.phone || '',
-                  currentLocation: { lat: baseLat, lng: baseLng },
-                  photoUrl: driverInfo?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
-                };
+              const driverLat = Number(driverInfo?.lat);
+              const driverLng = Number(driverInfo?.lng);
+              const hasRealLocation =
+                !isNaN(driverLat) && isFinite(driverLat) &&
+                !isNaN(driverLng) && isFinite(driverLng) &&
+                driverLat !== 0 && driverLng !== 0;
 
-                setAssignedDriver(mappedDriver);
+              const mappedDriver: Driver = {
+                id: driverInfo?.id || updatedRide.driver_id || 'drv-assigned',
+                name: driverInfo?.full_name || 'Conductor Moto Móvil',
+                rating: 5.0,
+                ridesCount: 150,
+                vehicle: driverInfo?.vehicle_model || 'Motocicleta',
+                plate: driverInfo?.vehicle_plate || 'SCZ',
+                phone: driverInfo?.phone || '',
+                currentLocation: hasRealLocation
+                  ? { lat: driverLat, lng: driverLng }
+                  : (origin || DEFAULT_CENTER),
+                photoUrl: driverInfo?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
+              };
+
+              setAssignedDriver(mappedDriver);
+
+              // Posición REAL del conductor (sin simulación)
+              if (hasRealLocation) {
+                setDriverLocation({ lat: driverLat, lng: driverLng });
+
+                // Ruta de aproximación real: conductor → origen
+                if (origin) {
+                  calculateRoute({ lat: driverLat, lng: driverLng }, origin).then(r => {
+                    setDriverRouteCoords(r.coordinates);
+                    const distM = Math.max(50, Math.round(r.distanceKm * 1000));
+                    setDriverDistanceMeters(distM);
+                    setEtaMinutes(Math.max(1, r.durationMinutes));
+                  }).catch(() => {});
+                }
+              }
+
+              // Solo mostrar notificación la primera vez
+              const isFirstTime = prev === 'solicitando';
+              if (isFirstTime) {
                 setStatusNotification(`🎉 ¡${mappedDriver.name} aceptó tu carrera!`);
                 setTimeout(() => setStatusNotification(null), 4000);
-                startDriverApproach(mappedDriver, origin);
-                return 'asignado';
               }
-              return prev;
+              return 'en_camino';
             });
           } else if (updatedRide.status === 'llegado_origen') {
             setRideStatus('llegado_origen');
@@ -478,116 +497,21 @@ export default function App() {
     setIsSubmittingRide(false);
   };
 
-  const startDriverApproach = useCallback(async (driver: Driver, pickupLoc: LatLng) => {
-    setRideStatus('en_camino');
-    const startPos: LatLng = driver.currentLocation || {
-      lat: pickupLoc.lat + 0.005, lng: pickupLoc.lng + 0.004
-    };
-    setDriverLocation(startPos);
-
-    try {
-      const approachResult = await calculateRoute(startPos, pickupLoc);
-      const coords = approachResult.coordinates;
-      setDriverRouteCoords(coords);
-      const totalDistMeters = Math.max(100, Math.round(approachResult.distanceKm * 1000));
-      setDriverDistanceMeters(totalDistMeters);
-      setEtaMinutes(Math.max(1, approachResult.durationMinutes));
-
-      if (driverMovementTimerRef.current) clearInterval(driverMovementTimerRef.current);
-
-      let currentStep = 0;
-      const totalSteps = coords.length;
-
-      driverMovementTimerRef.current = setInterval(() => {
-        currentStep += 1;
-        if (currentStep >= totalSteps - 1) {
-          clearInterval(driverMovementTimerRef.current);
-          driverMovementTimerRef.current = null;
-          const finalCoord = coords[totalSteps - 1];
-          setDriverLocation({ lat: finalCoord[0], lng: finalCoord[1] });
-          setDriverRouteCoords([]);
-          setDriverDistanceMeters(0);
-          setEtaMinutes(0);
-          setRideStatus('llegado_origen');
-          setStatusNotification(`🏍️ ¡${driver.name.split(' ')[0]} llegó!`);
-          setTimeout(() => setStatusNotification(null), 5000);
-        } else {
-          const pt = coords[currentStep];
-          setDriverLocation({ lat: pt[0], lng: pt[1] });
-          setDriverRouteCoords(coords.slice(currentStep));
-          const remainingFraction = (totalSteps - currentStep) / totalSteps;
-          const remDist = Math.max(30, Math.round(totalDistMeters * remainingFraction));
-          setDriverDistanceMeters(remDist);
-          setEtaMinutes(Math.max(1, Math.round((remDist / 1000) / 0.4)));
-        }
-      }, 1600);
-    } catch (err) {
-      console.warn('Could not compute approach route:', err);
-    }
-  }, []);
-
   const handleStartTripToDestination = useCallback(() => {
+    // El botón "Iniciar viaje" ya no existe en la UI.
+    // El conductor controla el inicio del viaje desde su app.
+    // Solo actualizamos el estado visual local por si acaso.
     setRideStatus('en_curso');
     setStatusNotification('🚀 ¡Viaje en curso!');
     setTimeout(() => setStatusNotification(null), 3500);
-
-    // ❌ NO actualizamos el estado del ride acá. El conductor es quien lo hace.
-
-    if (driverMovementTimerRef.current) clearInterval(driverMovementTimerRef.current);
-
-    if (routeCoords.length > 1 && destination) {
-      let step = 0;
-      const total = routeCoords.length;
-      driverMovementTimerRef.current = setInterval(() => {
-        step += 1;
-        if (step >= total - 1) {
-          clearInterval(driverMovementTimerRef.current);
-          driverMovementTimerRef.current = null;
-          setDriverLocation(destination);
-          handleCompleteRide();
-        } else {
-          const pt = routeCoords[step];
-          if (pt && !isNaN(pt[0]) && !isNaN(pt[1])) setDriverLocation({ lat: pt[0], lng: pt[1] });
-        }
-      }, 1800);
-    }
-  }, [activeRide, routeCoords, destination]);
-
-  const handleDriverAccept = (driver?: SupabaseDriver) => {
-    if (!driver) return;
-    const rawLat = Number(driver.lat), rawLng = Number(driver.lng);
-    const baseLat = (!isNaN(rawLat) && isFinite(rawLat)) ? rawLat : (origin?.lat || DEFAULT_CENTER.lat);
-    const baseLng = (!isNaN(rawLng) && isFinite(rawLng)) ? rawLng : (origin?.lng || DEFAULT_CENTER.lng);
-
-    const assigned: Driver = {
-      id: driver.id,
-      name: driver.full_name,
-      rating: 5.0, ridesCount: 150,
-      vehicle: driver.vehicle_model || 'Motocicleta',
-      plate: driver.vehicle_plate || 'SCZ',
-      phone: driver.phone || '',
-      currentLocation: { lat: baseLat, lng: baseLng },
-      photoUrl: driver.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
-    };
-
-    setAssignedDriver(assigned);
-    setRideStatus('asignado');
-    setStatusNotification(`🎉 ¡${assigned.name} aceptó!`);
-    setTimeout(() => setStatusNotification(null), 4000);
-    if (origin) startDriverApproach(assigned, origin);
-  };
+  }, []);
 
   const handleCancelRide = () => {
-    if (driverMovementTimerRef.current) {
-      clearInterval(driverMovementTimerRef.current);
-      driverMovementTimerRef.current = null;
-    }
     setDriverLocation(null);
     setDriverRouteCoords([]);
     setDriverDistanceMeters(0);
 
     if (activeRide && isSupabaseConfigured()) {
-      // ✅ Ahora pasamos passengerId → la RPC valida autorización
       updateRideStatusInSupabase(
         activeRide.id,
         'cancelado',
@@ -608,16 +532,8 @@ export default function App() {
   };
 
   const handleCompleteRide = () => {
-    if (driverMovementTimerRef.current) {
-      clearInterval(driverMovementTimerRef.current);
-      driverMovementTimerRef.current = null;
-    }
     setDriverRouteCoords([]);
     setDriverDistanceMeters(0);
-
-    // ❌ NO llamamos a updateRideStatusInSupabase acá.
-    // El conductor es quien marca el ride como 'completado' desde su app.
-    // El pasajero solo recibe el evento y muestra el modal de pago.
 
     if (rideSubRef.current) {
       rideSubRef.current();
@@ -637,9 +553,6 @@ export default function App() {
     setIsRatingOpen(true);
   };
 
-  // ═══════════════════════════════════════════════════════════════
-  // ENVIAR RATING
-  // ═══════════════════════════════════════════════════════════════
   const handleSubmitRating = async (rating: number) => {
     setIsRatingOpen(false);
 
@@ -749,7 +662,6 @@ export default function App() {
           onlineDrivers={onlineDrivers}
           viewedDrivers={viewedDrivers}
           onCancel={handleCancelRide}
-          onSimulateAccept={handleDriverAccept}
         />
       )}
 
@@ -877,7 +789,7 @@ export default function App() {
         localHistory={history}
       />
 
-      {/* ✅ AGREGAR ESTA LÍNEA */}
+      {/* Consola de debug — para ver logs en APK */}
       <DebugConsole />
     </div>
   );
