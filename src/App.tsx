@@ -28,7 +28,8 @@ import {
   getCachedPricingConfig,
   subscribeToOnlineDrivers,
   submitDriverRating,
-  uploadCargoPhoto
+  uploadCargoPhoto,
+  findClosestOnlineDriver   // 🎯 NUEVO
 } from './services/supabaseClient';
 
 const DEFAULT_CENTER: LatLng = { lat: -17.7833, lng: -63.1821 };
@@ -359,7 +360,7 @@ export default function App() {
   };
 
   // ═══════════════════════════════════════════════════════════════
-  // CREAR RIDE
+  // CREAR RIDE — ASIGNACIÓN AUTOMÁTICA
   // ═══════════════════════════════════════════════════════════════
   const handleRequestRide = async (rideType: 'moto' | 'express' = 'moto', customPrice?: number) => {
     if (!origin || !destination) return;
@@ -370,12 +371,41 @@ export default function App() {
       ? customPrice 
       : (rideType === 'express' ? fare.expressFare : fare.motoFare);
 
+    // ══════════════════════════════════════════════════════════════
+    //  🎯 ASIGNACIÓN AUTOMÁTICA
+    //  Intenta asignar al conductor más cercano en un radio de 3 km.
+    //  Si no hay ninguno → cae automáticamente a modo pool abierto.
+    //  El pasajero no ve ninguna decisión: todo es transparente.
+    // ══════════════════════════════════════════════════════════════
+    let targetDriverId: string | null = null;
+    
+    if (isSupabaseConfigured()) {
+      setStatusNotification('🔍 Buscando el conductor más cercano...');
+      
+      try {
+        const closest = await findClosestOnlineDriver(origin, 3.0);
+        
+        if (closest.found && closest.driver_id) {
+          targetDriverId = closest.driver_id;
+          console.log(`🎯 Asignado a ${closest.driver_name} (a ${closest.distance_km} km)`);
+          setStatusNotification(`✅ ${closest.driver_name} fue asignado — llegará en breve`);
+        } else {
+          console.log('📢 No hay conductor en 3 km, usando modo pool abierto');
+          setStatusNotification('📢 Buscando conductores disponibles...');
+        }
+      } catch (err) {
+        console.warn('Error buscando conductor cercano, usando pool:', err);
+        setStatusNotification('📢 Buscando conductores disponibles...');
+      }
+      
+      setTimeout(() => setStatusNotification(null), 3000);
+    }
+
     let rideId = 'ride-' + Date.now();
 
     let finalCargoPhotoUrl: string | undefined = undefined;
     if (hasCargo && cargoPhotoFile && isSupabaseConfigured()) {
-      const tempId = rideId;
-      const uploaded = await uploadCargoPhoto(cargoPhotoFile, tempId);
+      const uploaded = await uploadCargoPhoto(cargoPhotoFile, rideId);
       if (uploaded) finalCargoPhotoUrl = uploaded;
     } else if (hasCargo && cargoPhotoUrl && !cargoPhotoUrl.startsWith('blob:')) {
       finalCargoPhotoUrl = cargoPhotoUrl;
@@ -397,7 +427,6 @@ export default function App() {
     setViewedDrivers([]);
 
     if (isSupabaseConfigured()) {
-      setStatusNotification('Enviando solicitud a Supabase...');
       const { ride: dbRide, error } = await createRideInSupabase({
         origin, originAddress,
         destination, destinationAddress,
@@ -407,12 +436,13 @@ export default function App() {
         cargoDescription,
         cargoPhotoUrl: finalCargoPhotoUrl,
         passengerName: currentPassenger?.full_name || undefined,
-        passengerPhone: currentPassenger?.phone || undefined
+        passengerPhone: currentPassenger?.phone || undefined,
+        targetDriverId   // 🎯 null si no hay nadie cerca (pool), uuid si se asignó
       });
 
       if (dbRide) {
         newRide.id = dbRide.id;
-        setStatusNotification('✅ Solicitud registrada. Esperando conductor...');
+        setStatusNotification('✅ Solicitud enviada. Esperando confirmación...');
         setTimeout(() => setStatusNotification(null), 3500);
 
         if (rideSubRef.current) rideSubRef.current();
@@ -422,7 +452,6 @@ export default function App() {
 
           if (updatedRide.status === 'aceptado') {
             setRideStatus(prev => {
-              // Solo procesar si no estamos ya en camino
               if (prev !== 'solicitando' && prev !== 'asignado') return prev;
 
               const driverLat = Number(driverInfo?.lat);
@@ -448,11 +477,9 @@ export default function App() {
 
               setAssignedDriver(mappedDriver);
 
-              // Posición REAL del conductor (sin simulación)
               if (hasRealLocation) {
                 setDriverLocation({ lat: driverLat, lng: driverLng });
 
-                // Ruta de aproximación real: conductor → origen
                 if (origin) {
                   calculateRoute({ lat: driverLat, lng: driverLng }, origin).then(r => {
                     setDriverRouteCoords(r.coordinates);
@@ -463,7 +490,6 @@ export default function App() {
                 }
               }
 
-              // Solo mostrar notificación la primera vez
               const isFirstTime = prev === 'solicitando';
               if (isFirstTime) {
                 setStatusNotification(`🎉 ¡${mappedDriver.name} aceptó tu carrera!`);
@@ -498,9 +524,6 @@ export default function App() {
   };
 
   const handleStartTripToDestination = useCallback(() => {
-    // El botón "Iniciar viaje" ya no existe en la UI.
-    // El conductor controla el inicio del viaje desde su app.
-    // Solo actualizamos el estado visual local por si acaso.
     setRideStatus('en_curso');
     setStatusNotification('🚀 ¡Viaje en curso!');
     setTimeout(() => setStatusNotification(null), 3500);
@@ -789,7 +812,6 @@ export default function App() {
         localHistory={history}
       />
 
-      {/* Consola de debug — para ver logs en APK */}
       <DebugConsole />
     </div>
   );
