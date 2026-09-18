@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
+import { Geolocation } from '@capacitor/geolocation';
 import { LatLng, PointOfInterest, RideRequest, Driver, PricingConfig, SupabaseDriver, SupabasePassenger, DriverViewInfo } from './types';
 import { calculateRoute, calculateFare } from './services/routingService';
 import { reverseGeocode, detectUserLocationViaIP } from './services/geocodingService';
@@ -42,7 +43,7 @@ export default function App() {
   const [userLocation, setUserLocation] = useState<LatLng | null>(null);
   const [flyToTarget, setFlyToTarget] = useState<LatLng | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'locating' | 'gps' | 'ip' | 'default'>('locating');
-  const [statusNotification, setStatusNotification] = useState<string | null>('Obteniendo tu ubicación actual...');
+  const [statusNotification, setStatusNotification] = useState<string | null>('Iniciando aplicación...');
 
   const [origin, setOrigin] = useState<LatLng | null>(null);
   const [originAddress, setOriginAddress] = useState<string>('');
@@ -100,6 +101,7 @@ export default function App() {
   const hasCenteredInitialRef = useRef(false);
   const pushSetupDoneRef = useRef(false);
   const ghostCreationStartedRef = useRef(false);
+  const permissionsRequestedRef = useRef(false);
 
   // ═══════════════════════════════════════════════════════════════
   //  NOTIFICACIONES PUSH NATIVAS (FCM)
@@ -133,42 +135,26 @@ export default function App() {
       console.warn('⚠️ Error creando canal push:', e);
     }
 
-    // 2. Pedir permisos con verificación previa
+    // Pedir permisos con verificación previa
     try {
       const checkResult = await PushNotifications.checkPermissions();
-      console.log('📋 Estado de permisos actual:', checkResult.receive);
+      console.log('📋 Estado de permisos push actual:', checkResult.receive);
 
       let perm = checkResult;
 
       if (checkResult.receive !== 'granted') {
         console.log('🔔 Solicitando permiso de notificaciones...');
         perm = await PushNotifications.requestPermissions();
-        console.log('📋 Resultado de la solicitud:', perm.receive);
+        console.log('📋 Resultado de la solicitud push:', perm.receive);
       }
 
       if (perm.receive !== 'granted') {
-        console.warn('❌ Permiso de notificaciones denegado. El usuario debe habilitarlo manualmente.');
-        setTimeout(() => {
-          if (confirm(
-            '🔔 Las notificaciones están desactivadas.\n\n' +
-            'Para recibir avisos de tu viaje (conductor en camino, llegada, etc.) ' +
-            'necesitas activarlas en los ajustes del sistema.\n\n' +
-            '¿Quieres abrir los ajustes ahora?'
-          )) {
-            alert(
-              '📱 Instrucciones manuales:\n\n' +
-              '1. Abre Ajustes del celular\n' +
-              '2. Ve a Aplicaciones → Moto Móvil Pasajero\n' +
-              '3. Entra a Notificaciones\n' +
-              '4. Activa "Permitir notificaciones"\n' +
-              '5. Vuelve a abrir la app'
-            );
-          }
-        }, 1500);
+        console.warn('❌ Permiso de notificaciones no concedido. El usuario puede habilitarlo luego desde ajustes del celular si lo desea.');
+        // 🔕 Ya NO mostramos confirm() ni alert() que confundan al usuario.
         return;
       }
 
-      console.log('✅ Permiso concedido, registrando dispositivo...');
+      console.log('✅ Permiso push concedido, registrando dispositivo...');
       await PushNotifications.register();
 
     } catch (e) {
@@ -176,7 +162,7 @@ export default function App() {
       return;
     }
 
-    // 3. Escuchar registro y guardar token
+    // Escuchar registro y guardar token
     PushNotifications.addListener('registration', async (token) => {
       console.log('📱 Token FCM pasajero:', token.value.substring(0, 25) + '...');
 
@@ -251,6 +237,73 @@ export default function App() {
     setOriginAddress(geo.address);
   }, []);
 
+  // ═══════════════════════════════════════════════════════════════
+  //  SECUENCIA DE PERMISOS AL INICIAR: Ubicación → Notificaciones
+  // ═══════════════════════════════════════════════════════════════
+  const requestInitialPermissionsInSequence = useCallback(async () => {
+    if (permissionsRequestedRef.current) return;
+    permissionsRequestedRef.current = true;
+
+    // ═══ PASO 1: Pedir permiso de UBICACIÓN ═══
+    setStatusNotification('📍 Solicitando permiso de ubicación...');
+    console.log('📍 [1/2] Solicitando permiso de ubicación...');
+
+    let locationGranted = false;
+    try {
+      if (Capacitor.isNativePlatform()) {
+        // En APK usamos Capacitor Geolocation
+        const locPerm = await Geolocation.requestPermissions();
+        locationGranted = locPerm.location === 'granted' || locPerm.coarseLocation === 'granted';
+        console.log('📍 Resultado permiso ubicación (nativo):', locPerm);
+      } else if ('geolocation' in navigator && navigator.permissions) {
+        // En web usamos la Permissions API
+        try {
+          const result = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
+          if (result.state === 'granted') {
+            locationGranted = true;
+          } else {
+            // Pedimos la ubicación una vez para gatillar el prompt
+            await new Promise<void>((resolve) => {
+              navigator.geolocation.getCurrentPosition(
+                () => { locationGranted = true; resolve(); },
+                () => { locationGranted = false; resolve(); },
+                { timeout: 8000 }
+              );
+            });
+          }
+        } catch {
+          // Si falla la Permissions API, intentamos pedir directamente
+          await new Promise<void>((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+              () => { locationGranted = true; resolve(); },
+              () => { locationGranted = false; resolve(); },
+              { timeout: 8000 }
+            );
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('⚠️ Error pidiendo permiso de ubicación:', e);
+    }
+
+    console.log(locationGranted ? '✅ Ubicación concedida' : '❌ Ubicación rechazada');
+
+    // ═══ PASO 2: Pedir permiso de NOTIFICACIONES ═══
+    // Solo después de que el usuario haya respondido al de ubicación
+    setStatusNotification('🔔 Solicitando permiso de notificaciones...');
+    console.log('🔔 [2/2] Solicitando permiso de notificaciones...');
+
+    try {
+      await setupPushNotificationsForPassenger();
+    } catch (e) {
+      console.warn('⚠️ Error pidiendo permiso de notificaciones:', e);
+    }
+
+    // ═══ LISTO: Ambos permisos gestionados ═══
+    setStatusNotification(null);
+    console.log('✅ Secuencia de permisos completada');
+  }, [setupPushNotificationsForPassenger]);
+
   useEffect(() => {
     const activePassenger = getCurrentPassenger();
     if (activePassenger) setCurrentPassenger(activePassenger);
@@ -262,30 +315,35 @@ export default function App() {
 
     setIsSupabaseConnected(isSupabaseConfigured());
 
-    // 👻 Auto-crear cuenta fantasma si no hay sesión (solo 1 vez)
-    if (!activePassenger && !ghostCreationStartedRef.current && isSupabaseConfigured()) {
-      ghostCreationStartedRef.current = true;
-      createGhostPassengerIfNeeded().then(p => {
-        if (p) {
-          setCurrentPassenger(p);
-          savePendingPushToken(p.id);
-          setTimeout(() => {
-            pushSetupDoneRef.current = false;
-            setupPushNotificationsForPassenger();
-          }, 300);
-        } else {
-          // Si no se pudo crear la fantasma, igual intentamos configurar push
-          setTimeout(() => setupPushNotificationsForPassenger(), 500);
+    // ══════════════════════════════════════════════════════════════
+    //  ORQUESTACIÓN AL INICIAR LA APP:
+    //  1. Cuenta fantasma (en background)
+    //  2. Permiso de ubicación
+    //  3. Permiso de notificaciones
+    //  4. Ubicación GPS real
+    // ══════════════════════════════════════════════════════════════
+    const initializeApp = async () => {
+      // --- Cuenta fantasma (silencioso, no bloqueante) ---
+      if (!activePassenger && !ghostCreationStartedRef.current && isSupabaseConfigured()) {
+        ghostCreationStartedRef.current = true;
+        try {
+          const p = await createGhostPassengerIfNeeded();
+          if (p) {
+            setCurrentPassenger(p);
+            savePendingPushToken(p.id);
+          }
+        } catch (e) {
+          console.warn('Error creando cuenta fantasma:', e);
         }
-      });
-    } else if (activePassenger) {
-      // Ya hay sesión: guardar token pendiente + configurar push
-      savePendingPushToken(activePassenger.id);
-      setTimeout(() => setupPushNotificationsForPassenger(), 500);
-    } else {
-      // Sin Supabase configurado: igual intentamos configurar push
-      setTimeout(() => setupPushNotificationsForPassenger(), 800);
-    }
+      } else if (activePassenger) {
+        savePendingPushToken(activePassenger.id);
+      }
+
+      // --- Secuencia de permisos: Ubicación → Notificaciones ---
+      await requestInitialPermissionsInSequence();
+    };
+
+    initializeApp();
 
     let watchId: number | null = null;
 
@@ -301,47 +359,53 @@ export default function App() {
         hasCenteredInitialRef.current = true;
         setFlyToTarget(safeCoords);
         await applyOriginLocation(safeCoords, true);
-        setStatusNotification(method === 'gps' ? '📍 Ubicación GPS detectada' : '📍 Ubicación detectada');
-        setTimeout(() => setStatusNotification(null), 4500);
       }
     };
 
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const lat = Number(pos?.coords?.latitude);
-          const lng = Number(pos?.coords?.longitude);
-          if (!isNaN(lat) && !isNaN(lng)) onLocationResolved({ lat, lng }, 'gps');
-        },
-        async () => {
-          const ipLoc = await detectUserLocationViaIP();
-          if (ipLoc && !isNaN(ipLoc.lat) && !isNaN(ipLoc.lng)) {
-            onLocationResolved({ lat: ipLoc.lat, lng: ipLoc.lng }, 'ip');
-          } else if (!hasCenteredInitialRef.current) {
-            hasCenteredInitialRef.current = true;
-            setGpsStatus('default');
-            applyOriginLocation(DEFAULT_CENTER, true);
-          }
-        },
-        { enableHighAccuracy: true, timeout: 4000 }
-      );
-
-      try {
-        watchId = navigator.geolocation.watchPosition(
+    // Una vez pedidos los permisos, obtenemos la ubicación
+    const startLocationTracking = async () => {
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
           (pos) => {
             const lat = Number(pos?.coords?.latitude);
             const lng = Number(pos?.coords?.longitude);
-            if (!isNaN(lat) && !isNaN(lng)) {
-              const fresh = { lat, lng };
-              setUserLocation(fresh);
-              if (!hasCenteredInitialRef.current) onLocationResolved(fresh, 'gps');
+            if (!isNaN(lat) && !isNaN(lng)) onLocationResolved({ lat, lng }, 'gps');
+          },
+          async () => {
+            const ipLoc = await detectUserLocationViaIP();
+            if (ipLoc && !isNaN(ipLoc.lat) && !isNaN(ipLoc.lng)) {
+              onLocationResolved({ lat: ipLoc.lat, lng: ipLoc.lng }, 'ip');
+            } else if (!hasCenteredInitialRef.current) {
+              hasCenteredInitialRef.current = true;
+              setGpsStatus('default');
+              applyOriginLocation(DEFAULT_CENTER, true);
             }
           },
-          () => {},
-          { enableHighAccuracy: true, maximumAge: 8000 }
+          { enableHighAccuracy: true, timeout: 4000 }
         );
-      } catch {}
-    }
+
+        try {
+          watchId = navigator.geolocation.watchPosition(
+            (pos) => {
+              const lat = Number(pos?.coords?.latitude);
+              const lng = Number(pos?.coords?.longitude);
+              if (!isNaN(lat) && !isNaN(lng)) {
+                const fresh = { lat, lng };
+                setUserLocation(fresh);
+                if (!hasCenteredInitialRef.current) onLocationResolved(fresh, 'gps');
+              }
+            },
+            () => {},
+            { enableHighAccuracy: true, maximumAge: 8000 }
+          );
+        } catch {}
+      }
+    };
+
+    // Esperamos un poco antes de arrancar el tracking para dar tiempo a los permisos
+    setTimeout(() => {
+      startLocationTracking();
+    }, 500);
 
     const fallbackTimer = setTimeout(async () => {
       if (!hasCenteredInitialRef.current) {
@@ -354,13 +418,13 @@ export default function App() {
           applyOriginLocation(DEFAULT_CENTER, true);
         }
       }
-    }, 2200);
+    }, 4000);
 
     return () => {
       clearTimeout(fallbackTimer);
       if (watchId !== null && 'geolocation' in navigator) navigator.geolocation.clearWatch(watchId);
     };
-  }, [applyOriginLocation, setupPushNotificationsForPassenger, savePendingPushToken]);
+  }, [applyOriginLocation, setupPushNotificationsForPassenger, savePendingPushToken, requestInitialPermissionsInSequence]);
 
   useEffect(() => {
     fetchPricingConfigFromSupabase().then(setPricingConfig);
@@ -798,9 +862,6 @@ export default function App() {
           <div className="bg-slate-900/95 border border-slate-700 text-slate-100 text-xs px-3.5 py-2 rounded-full shadow-2xl backdrop-blur-md flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-ping" />
             <span className="font-medium">{statusNotification}</span>
-            <button onClick={handleLocateUser} className="ml-1 text-[11px] font-bold text-amber-400 hover:text-amber-300 underline">
-              Centrar
-            </button>
           </div>
         </div>
       )}
@@ -974,10 +1035,6 @@ export default function App() {
           setCurrentPassenger(p);
           if (p) {
             savePendingPushToken(p.id);
-            setTimeout(() => {
-              pushSetupDoneRef.current = false;
-              setupPushNotificationsForPassenger();
-            }, 500);
           }
         }}
         onRepeatRide={handleRepeatRide}
