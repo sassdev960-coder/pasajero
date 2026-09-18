@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
-import { LatLng, MapTileLayer, PointOfInterest, Driver, SupabaseDriver, DriverViewInfo } from '../types';
-import { POPULAR_LANDMARKS } from '../data/landmarks';
-import { Layers, Crosshair, MapPin, Maximize2, Bike, Navigation, Store, Hospital, Building2, Fuel, ShoppingBag, Landmark } from 'lucide-react';
+import { LatLng, MapTileLayer, Driver, SupabaseDriver, DriverViewInfo } from '../types';
+import { Layers, Crosshair, MapPin, Maximize2, Bike } from 'lucide-react';
 
 interface MapComponentProps {
   origin: LatLng | null;
@@ -29,7 +28,7 @@ interface MapComponentProps {
   onMapMoved: (center: LatLng) => void;
   onConfirmPinLocation: () => void;
   onCancelPinSelection?: () => void;
-  onSelectPOIAsTarget: (poi: PointOfInterest, asOrigin: boolean) => void;
+  onSelectPOIAsTarget: (poi: any, asOrigin: boolean) => void;
   onLocateUser: () => void;
 }
 
@@ -75,7 +74,6 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   isSelectingDestination,
   centerAddress,
   isGeocodingCenter,
-  selectedCategory,
   assignedDriver,
   driverLocation,
   driverRouteCoords,
@@ -88,7 +86,6 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   onMapMoved,
   onConfirmPinLocation,
   onCancelPinSelection,
-  onSelectPOIAsTarget,
   onLocateUser
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -102,7 +99,6 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   const routePolylineRef = useRef<L.Polyline | null>(null);
   const routeBackgroundRef = useRef<L.Polyline | null>(null);
   const routeBadgeMarkerRef = useRef<L.Marker | null>(null);
-  const poiLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const onlineDriversLayerRef = useRef<L.LayerGroup | null>(null);
 
   // Driver approaching refs
@@ -136,10 +132,6 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     }).addTo(map);
 
     tileLayerRef.current = tileLayer;
-
-    // Layer group for POIs
-    const poiGroup = L.layerGroup().addTo(map);
-    poiLayerGroupRef.current = poiGroup;
 
     // Layer group for Online Drivers on Map
     const onlineGroup = L.layerGroup().addTo(map);
@@ -687,83 +679,6 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     }
   }, [onlineDrivers, origin]);
 
-  // Render Landmarks / POIs
-  useEffect(() => {
-    if (!poiLayerGroupRef.current) return;
-    const poiGroup = poiLayerGroupRef.current;
-    poiGroup.clearLayers();
-
-    const filtered = selectedCategory
-      ? POPULAR_LANDMARKS.filter(l => l.category === selectedCategory)
-      : POPULAR_LANDMARKS;
-
-    filtered.forEach(poi => {
-      if (!isValidNum(poi.lat) || !isValidNum(poi.lng)) return;
-
-      const colorClass = poi.category === 'hospital' ? 'bg-red-500' 
-        : poi.category === 'mercado' ? 'bg-amber-500' 
-        : poi.category === 'mall' ? 'bg-purple-500' 
-        : poi.category === 'gasolinera' ? 'bg-blue-500' 
-        : 'bg-emerald-600';
-
-      const poiHtml = `
-        <div class="group relative flex flex-col items-center cursor-pointer transform transition-transform hover:scale-110">
-          <div class="w-6 h-6 rounded-full ${colorClass} border-2 border-white shadow-md flex items-center justify-center text-white text-[10px]">
-            📍
-          </div>
-          <div class="bg-gray-900/90 text-white text-[10px] font-semibold px-2 py-0.5 rounded shadow-lg whitespace-nowrap mt-1 border border-gray-700 pointer-events-none">
-            ${poi.name}
-          </div>
-        </div>
-      `;
-
-      const icon = L.divIcon({
-        html: poiHtml,
-        className: 'poi-custom-marker',
-        iconSize: [80, 44],
-        iconAnchor: [40, 14]
-      });
-
-      const marker = L.marker([poi.lat, poi.lng], { icon });
-
-      // Popup with 1-tap actions
-      const popupContent = document.createElement('div');
-      popupContent.className = 'p-2 text-slate-900 min-w-[190px]';
-      popupContent.innerHTML = `
-        <div class="font-bold text-sm">${poi.name}</div>
-        <div class="text-xs text-gray-500 mb-2">${poi.address}</div>
-        <div class="flex gap-2">
-          <button id="poi-set-origin-${poi.id}" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-1 px-2 rounded">
-            Partir aquí
-          </button>
-          <button id="poi-set-dest-${poi.id}" class="flex-1 bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold py-1 px-2 rounded">
-            Ir aquí
-          </button>
-        </div>
-      `;
-
-      marker.bindPopup(popupContent);
-      marker.on('popupopen', () => {
-        const btnOrigin = document.getElementById(`poi-set-origin-${poi.id}`);
-        const btnDest = document.getElementById(`poi-set-dest-${poi.id}`);
-        if (btnOrigin) {
-          btnOrigin.onclick = () => {
-            onSelectPOIAsTarget(poi, true);
-            marker.closePopup();
-          };
-        }
-        if (btnDest) {
-          btnDest.onclick = () => {
-            onSelectPOIAsTarget(poi, false);
-            marker.closePopup();
-          };
-        }
-      });
-
-      poiGroup.addLayer(marker);
-    });
-  }, [selectedCategory, onSelectPOIAsTarget]);
-
   return (
     <div className="relative w-full h-full">
       {/* Map Container */}
@@ -879,7 +794,6 @@ export const MapComponent: React.FC<MapComponentProps> = ({
               <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
             </span>
           )}
-          {/* Tooltip on desktop */}
           <span className="absolute right-14 bg-slate-950/95 text-slate-100 text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-700 whitespace-nowrap shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity hidden md:block">
             Mi Ubicación Exacta
           </span>
@@ -907,7 +821,6 @@ export const MapComponent: React.FC<MapComponentProps> = ({
           {/* Layer selector popover menu */}
           {showLayerMenu && (
             <>
-              {/* Invisible backdrop to dismiss click outside */}
               <div
                 className="fixed inset-0 z-20"
                 onClick={() => setShowLayerMenu(false)}
@@ -955,7 +868,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
           )}
         </div>
 
-        {/* Full Route Centering Button (Available when route is calculated) */}
+        {/* Full Route Centering Button */}
         {routeCoords.length >= 2 && (
           <button
             onClick={handleCenterFullRoute}
@@ -986,7 +899,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
           </button>
         )}
 
-        {/* Center Driver Button (Available when driver is assigned) */}
+        {/* Center Driver Button */}
         {driverLocation && (
           <button
             onClick={handleCenterDriver}
