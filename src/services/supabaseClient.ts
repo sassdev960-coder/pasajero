@@ -1,4 +1,4 @@
-// src/services/supabaseClient.ts — VERSIÓN v3 FINAL (con RPCs seguras)
+// src/services/supabaseClient.ts — VERSIÓN v4 (asignación automática de conductor)
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { SupabaseRide, SupabaseDriver, SupabasePassenger, LatLng, PricingConfig, DriverViewInfo } from '../types';
 
@@ -55,10 +55,8 @@ export async function testSupabaseConnection(): Promise<{ success: boolean; mess
   const client = getSupabase();
   if (!client) return { success: false, message: 'URL o Clave anónima no configuradas.' };
   try {
-    // RPC pública → no expone datos
     const { error: rpcError } = await client.rpc('get_online_drivers_for_passenger');
     if (rpcError) {
-      // Fallback: probar la tabla pricing_config que es pública
       const { error: pricingError } = await client.from('pricing_config').select('id').limit(1);
       if (pricingError) return { success: false, message: `Error de conexión: ${pricingError.message}` };
     }
@@ -73,7 +71,7 @@ export async function testSupabaseConnection(): Promise<{ success: boolean; mess
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PASAJERO — SESIÓN Y PERFIL (usa RPCs, no expone tablas)
+// PASAJERO — SESIÓN Y PERFIL
 // ═══════════════════════════════════════════════════════════════
 
 const PASSENGER_SESSION_KEY = 'motocampeon_passenger_session';
@@ -116,7 +114,6 @@ export async function registerPassenger(
     return { passenger: null, error: 'Por favor completa todos los campos.' };
   }
 
-  // Sin Supabase → solo localStorage
   if (!client) {
     const localPassenger: SupabasePassenger = {
       id: 'local-pass-' + Date.now(),
@@ -221,7 +218,6 @@ export async function updatePassengerProfile(
     created_at: current?.created_at || new Date().toISOString()
   };
 
-  // Sin cliente → solo localStorage
   if (!client) {
     setCurrentPassenger(updated);
     return { success: true, passenger: updated };
@@ -301,7 +297,6 @@ export async function getOrCreatePassenger(passengerInfo?: {
     const fullName = passengerInfo?.fullName || localStorage.getItem('motocampeon_passenger_name') || 'Pasajero Moto Campeón';
     const ci = passengerInfo?.ci || localStorage.getItem('motocampeon_passenger_ci') || '7891234';
 
-    // Usar la RPC que ya maneja el upsert
     const { data, error } = await client.rpc('register_or_update_passenger', {
       p_full_name: fullName,
       p_phone: phone,
@@ -323,7 +318,47 @@ export async function getOrCreatePassenger(passengerInfo?: {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// CREAR RIDE (INSERT público sigue activo)
+// 🎯 ASIGNACIÓN AUTOMÁTICA — Buscar conductor más cercano
+// ═══════════════════════════════════════════════════════════════
+export async function findClosestOnlineDriver(
+  origin: LatLng,
+  maxRadiusKm: number = 3.0
+): Promise<{
+  found: boolean;
+  driver_id?: string;
+  driver_name?: string;
+  vehicle_model?: string;
+  vehicle_plate?: string;
+  avatar_url?: string | null;
+  phone?: string;
+  lat?: number;
+  lng?: number;
+  distance_km?: number;
+  error?: string;
+}> {
+  const client = getSupabase();
+  if (!client) return { found: false, error: 'Supabase no configurado' };
+
+  try {
+    const { data, error } = await client.rpc('find_closest_online_driver', {
+      p_origin_lat: origin.lat,
+      p_origin_lng: origin.lng,
+      p_max_radius_km: maxRadiusKm
+    });
+
+    if (error) {
+      console.error('[findClosestOnlineDriver] RPC error:', error.message);
+      return { found: false, error: error.message };
+    }
+    return data as any;
+  } catch (err: any) {
+    console.error('[findClosestOnlineDriver] excepción:', err);
+    return { found: false, error: err.message };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CREAR RIDE — Asignación automática si viene targetDriverId
 // ═══════════════════════════════════════════════════════════════
 export async function createRideInSupabase(rideData: {
   origin: LatLng; originAddress: string;
@@ -331,6 +366,7 @@ export async function createRideInSupabase(rideData: {
   price: number; distanceKm: number; durationMins: number;
   hasCargo: boolean; cargoDescription?: string; cargoPhotoUrl?: string;
   passengerName?: string; passengerPhone?: string;
+  targetDriverId?: string | null;   // 🎯 NUEVO
 }): Promise<{ ride: SupabaseRide | null; error: string | null }> {
   const client = getSupabase();
   if (!client) return { ride: null, error: 'Supabase no está configurado.' };
@@ -342,6 +378,11 @@ export async function createRideInSupabase(rideData: {
     });
 
     console.log('📤 [RIDE] Creando vía RPC, passengerId:', passengerId);
+    if (rideData.targetDriverId) {
+      console.log('🎯 [RIDE] Con asignación automática a driver:', rideData.targetDriverId);
+    } else {
+      console.log('📢 [RIDE] Sin asignación → modo pool abierto');
+    }
 
     const { data, error } = await client.rpc('create_ride_for_passenger', {
       p_passenger_id: passengerId,
@@ -366,15 +407,39 @@ export async function createRideInSupabase(rideData: {
       return { ride: null, error: error.message };
     }
 
-    console.log('✅ [RIDE] Creado:', (data as any)?.id);
-    return { ride: data as SupabaseRide, error: null };
+    const createdRide = data as SupabaseRide;
+
+    // ══════════════════════════════════════════════════════════════
+    // 🎯 ASIGNACIÓN AUTOMÁTICA AL CONDUCTOR MÁS CERCANO
+    // Si targetDriverId viene con valor, actualizamos el ride para
+    // que SOLO ese conductor reciba la notificación push.
+    // Si falla, el ride queda como pool abierto (no rompemos nada).
+    // ══════════════════════════════════════════════════════════════
+    if (rideData.targetDriverId && createdRide?.id) {
+      const { error: assignErr } = await client
+        .from('rides')
+        .update({ driver_id: rideData.targetDriverId })
+        .eq('id', createdRide.id);
+
+      if (!assignErr) {
+        createdRide.driver_id = rideData.targetDriverId;
+        console.log('✅ [RIDE] Asignado automáticamente a:', rideData.targetDriverId);
+      } else {
+        console.warn('⚠️ [RIDE] No se pudo asignar automáticamente:', assignErr.message);
+        console.warn('   → El ride quedará en modo pool (todos reciben notificación)');
+      }
+    }
+
+    console.log('✅ [RIDE] Creado:', createdRide?.id);
+    return { ride: createdRide, error: null };
   } catch (err: any) {
     console.error('❌ [RIDE] Excepción:', err);
     return { ride: null, error: err.message };
   }
 }
+
 // ═══════════════════════════════════════════════════════════════
-// CONDUCTORES — Consultas vía RPC (no expone tabla drivers)
+// CONDUCTORES — Consultas vía RPC
 // ═══════════════════════════════════════════════════════════════
 
 export function calculateStraightDistanceKm(p1: LatLng, p2: LatLng): number {
@@ -385,10 +450,6 @@ export function calculateStraightDistanceKm(p1: LatLng, p2: LatLng): number {
   return Number((R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))).toFixed(2));
 }
 
-/**
- * Obtiene conductores en línea vía RPC pública
- * (reemplaza SELECT directo en driver_status + drivers)
- */
 export async function getOnlineDrivers(_refCenter?: LatLng): Promise<SupabaseDriver[]> {
   const client = getSupabase();
   if (!client) {
@@ -413,9 +474,6 @@ export async function getOnlineDrivers(_refCenter?: LatLng): Promise<SupabaseDri
   }
 }
 
-/**
- * Polling cada 3s (realtime no llega por RLS al anon)
- */
 export function subscribeToOnlineDrivers(
   onUpdate: (drivers: SupabaseDriver[]) => void,
   refCenter?: LatLng
@@ -423,10 +481,8 @@ export function subscribeToOnlineDrivers(
   const client = getSupabase();
   if (!client) { onUpdate([]); return () => {}; }
 
-  // Fetch inicial
   getOnlineDrivers(refCenter).then(onUpdate);
 
-  // Polling cada 3s (el realtime no funciona para anon por RLS)
   const pollTimer = setInterval(() => {
     getOnlineDrivers(refCenter).then(onUpdate);
   }, 3000);
@@ -448,9 +504,6 @@ export async function markRideAsViewedInSupabase(
   if (!client) return false;
 
   try {
-    // Nota: sin policy pública de SELECT/UPDATE en rides, esto fallará silenciosamente.
-    // En producción, el conductor es quien marca "visto" desde su app autenticada.
-    // Aquí lo dejamos como intento best-effort.
     const { data: ride } = await client.from('rides').select('viewed_by_drivers').eq('id', rideId).maybeSingle();
 
     let distKm = 0.8;
@@ -487,9 +540,6 @@ export async function markRideAsViewedInSupabase(
   }
 }
 
-/**
- * Conductores que vieron una solicitud → vía RPC
- */
 export async function fetchRideInterestedDrivers(rideId: string): Promise<DriverViewInfo[]> {
   const client = getSupabase();
   if (!client) return [];
@@ -505,7 +555,7 @@ export async function fetchRideInterestedDrivers(rideId: string): Promise<Driver
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SUBSCRIBIR A CAMBIOS DE RIDE → vía RPC + polling
+// SUBSCRIBIR A CAMBIOS DE RIDE
 // ═══════════════════════════════════════════════════════════════
 export function subscribeToRideChanges(
   rideId: string,
@@ -536,7 +586,6 @@ export function subscribeToRideChanges(
         ? viewersRaw.filter((v: any) => v && typeof v === 'object' && v.driver_id)
         : [];
 
-      // Sólo emitir si cambió algo (optimización)
       const currentJson = JSON.stringify({ status: ride.status, driver_id: ride.driver_id, viewers: viewers.length });
       if (currentJson !== lastRideJson) {
         lastRideJson = currentJson;
@@ -558,7 +607,7 @@ export function subscribeToRideChanges(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ACTUALIZAR ESTADO DEL RIDE → cancelación vía RPC
+// ACTUALIZAR ESTADO DEL RIDE (cancelación)
 // ═══════════════════════════════════════════════════════════════
 export async function updateRideStatusInSupabase(
   rideId: string,
@@ -569,7 +618,6 @@ export async function updateRideStatusInSupabase(
   const client = getSupabase();
   if (!client) return false;
 
-  // El pasajero solo puede cancelar. El resto lo hace el conductor.
   if (status !== 'cancelado') {
     console.log('⏭️ Ignorando cambio de estado desde el pasajero:', status);
     return true;
@@ -605,7 +653,7 @@ export async function updateRideStatusInSupabase(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ACEPTAR RIDE (para el conductor — usado en simulación del panel)
+// ACEPTAR RIDE (simulación)
 // ═══════════════════════════════════════════════════════════════
 export async function acceptRideAsDriverInSupabase(
   rideId: string, driverId: string
@@ -614,9 +662,6 @@ export async function acceptRideAsDriverInSupabase(
   if (!client) return { success: false, error: 'Supabase no configurado' };
 
   try {
-    // El UPDATE directo lo hace el conductor autenticado.
-    // Como anon, este intento probablemente falle por RLS.
-    // Es solo para el modo "simulación" del pasajero.
     const { data, error } = await client
       .from('rides')
       .update({
@@ -638,7 +683,7 @@ export async function acceptRideAsDriverInSupabase(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// GUARDAR RATING DEL CONDUCTOR (INSERT público sigue activo)
+// GUARDAR RATING DEL CONDUCTOR
 // ═══════════════════════════════════════════════════════════════
 export async function submitDriverRating(
   rideId: string, driverId: string, passengerId: string | null,
@@ -664,7 +709,6 @@ export async function submitDriverRating(
 
 // ═══════════════════════════════════════════════════════════════
 // SUBIR FOTO DE BULTO A STORAGE
-// (requiere policy "Passengers can upload ride photos")
 // ═══════════════════════════════════════════════════════════════
 export async function uploadCargoPhoto(file: File, rideId: string): Promise<string | null> {
   const client = getSupabase();
@@ -692,7 +736,7 @@ export async function uploadCargoPhoto(file: File, rideId: string): Promise<stri
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PRICING CONFIG (público, sin cambios)
+// PRICING CONFIG
 // ═══════════════════════════════════════════════════════════════
 export const DEFAULT_PRICING_CONFIG: PricingConfig = {
   base_radius_meters: 1300,
