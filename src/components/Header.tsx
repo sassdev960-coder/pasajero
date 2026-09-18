@@ -1,43 +1,31 @@
 import React, { useState } from 'react';
-import { Bike, HelpCircle, History, Sparkles, Store, Hospital, Building2, Fuel, ShoppingBag, Landmark, MapPin, Navigation, Database, User } from 'lucide-react';
+import { Bike, History, MapPin, Database, User } from 'lucide-react';
 import { LatLng, SupabasePassenger } from '../types';
 
 interface HeaderProps {
-  selectedCategory: string | null;
   userLocation: LatLng | null;
   isSupabaseConnected: boolean;
   currentPassenger: SupabasePassenger | null;
-  onSelectCategory: (cat: string | null) => void;
   onOpenAnalysis?: () => void;
   onOpenHistory: () => void;
   onCenterUserLocation: () => void;
   onOpenCityPicker: () => void;
   onOpenSupabase: () => void;
   onOpenPassengerModal: () => void;
+  // ⚠️ Props opcionales (mantenidas por compatibilidad con App.tsx, ya no se usan)
+  selectedCategory?: string | null;
+  onSelectCategory?: (cat: string | null) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  selectedCategory,
-  userLocation,
   isSupabaseConnected,
   currentPassenger,
-  onSelectCategory,
-  onOpenAnalysis,
   onOpenHistory,
-  onCenterUserLocation,
   onOpenCityPicker,
   onOpenSupabase,
   onOpenPassengerModal
 }) => {
   const [imgFailed, setImgFailed] = useState(false);
-
-  const categories = [
-    { id: 'mercado', label: 'Mercados', icon: Store, color: 'text-amber-400' },
-    { id: 'hospital', label: 'Hospitales', icon: Hospital, color: 'text-red-400' },
-    { id: 'mall', label: 'Malls', icon: ShoppingBag, color: 'text-purple-400' },
-    { id: 'gasolinera', label: 'Gasolineras', icon: Fuel, color: 'text-blue-400' },
-    { id: 'plaza', label: 'Plazas', icon: Landmark, color: 'text-emerald-400' }
-  ];
 
   return (
     <header className="absolute top-0 left-0 right-0 z-20 pointer-events-none flex flex-col p-3 gap-2">
@@ -123,39 +111,6 @@ export const Header: React.FC<HeaderProps> = ({
             <History className="w-4 h-4" />
           </button>
         </div>
-      </div>
-
-      {/* Interactive Landmark Filters Carousel */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pointer-events-auto scrollbar-none px-1">
-        <button
-          onClick={() => onSelectCategory(null)}
-          className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shadow-md backdrop-blur-md transition border ${
-            selectedCategory === null
-              ? 'bg-amber-500 text-slate-950 border-amber-400'
-              : 'bg-slate-900/80 text-slate-300 border-slate-700 hover:bg-slate-800'
-          }`}
-        >
-          Todos los puntos
-        </button>
-
-        {categories.map((cat) => {
-          const Icon = cat.icon;
-          const isActive = selectedCategory === cat.id;
-          return (
-            <button
-              key={cat.id}
-              onClick={() => onSelectCategory(isActive ? null : cat.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shadow-md backdrop-blur-md transition border ${
-                isActive
-                  ? 'bg-amber-500 text-slate-950 border-amber-400'
-                  : 'bg-slate-900/80 text-slate-300 border-slate-700 hover:bg-slate-800'
-              }`}
-            >
-              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-slate-950' : cat.color}`} />
-              <span>{cat.label}</span>
-            </button>
-          );
-        })}
       </div>
     </header>
   );
