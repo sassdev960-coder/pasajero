@@ -39,6 +39,8 @@ import {
 
 const DEFAULT_CENTER: LatLng = { lat: -17.7833, lng: -63.1821 };
 
+type NotificationPermState = 'granted' | 'denied' | 'prompt' | 'unknown';
+
 export default function App() {
   const [userLocation, setUserLocation] = useState<LatLng | null>(null);
   const [flyToTarget, setFlyToTarget] = useState<LatLng | null>(null);
@@ -96,12 +98,79 @@ export default function App() {
   const [history, setHistory] = useState<RideRequest[]>([]);
   const [pricingConfig, setPricingConfig] = useState<PricingConfig>(getCachedPricingConfig());
 
+  // 🎯 Estado del permiso de notificaciones
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermState>('unknown');
+
   const rideSubRef = useRef<(() => void) | null>(null);
   const geocodeTimerRef = useRef<any>(null);
   const hasCenteredInitialRef = useRef(false);
   const pushSetupDoneRef = useRef(false);
   const ghostCreationStartedRef = useRef(false);
   const permissionsRequestedRef = useRef(false);
+
+  // ═══════════════════════════════════════════════════════════════
+  //  🎯 VERIFICAR ESTADO DEL PERMISO DE NOTIFICACIONES (POLLING)
+  // ═══════════════════════════════════════════════════════════════
+  const refreshNotificationPermission = useCallback(async () => {
+    if (!Capacitor.isNativePlatform()) {
+      setNotificationPermission('unknown');
+      return;
+    }
+    try {
+      const result = await PushNotifications.checkPermissions();
+      const state = result.receive as NotificationPermState;
+      setNotificationPermission(state);
+      console.log('🔔 Estado permiso notificaciones:', state);
+    } catch (e) {
+      console.warn('Error chequeando permiso push:', e);
+    }
+  }, []);
+
+  // Polling cada 4 segundos para detectar cuando el usuario regresa de ajustes
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    // Chequeo inicial
+    refreshNotificationPermission();
+
+    const interval = setInterval(() => {
+      refreshNotificationPermission();
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [refreshNotificationPermission]);
+
+  // ═══════════════════════════════════════════════════════════════
+  //  🎯 ABRIR AJUSTES DE NOTIFICACIONES DEL SISTEMA
+  // ═══════════════════════════════════════════════════════════════
+  const openNotificationSettings = useCallback(() => {
+    console.log('⚙️ Abriendo ajustes de notificaciones...');
+    const platform = Capacitor.getPlatform();
+
+    if (platform === 'android') {
+      const packageName = 'com.motomovil.pasajero';
+      // Intent directo a la pantalla de notificaciones de la app
+      const intentUrl = `intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;S.package=${packageName};end`;
+      try {
+        window.location.href = intentUrl;
+        return;
+      } catch (e) {
+        console.warn('Fallback a ajustes generales:', e);
+      }
+      // Fallback: abrir ajustes generales de la app
+      try {
+        window.location.href = `intent:#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;data=package:${packageName};end`;
+      } catch (e2) {
+        console.warn('Fallback 2 falló:', e2);
+      }
+    } else if (platform === 'ios') {
+      try {
+        window.location.href = 'app-settings:';
+      } catch (e) {
+        console.warn('No se pudo abrir ajustes iOS:', e);
+      }
+    }
+  }, []);
 
   // ═══════════════════════════════════════════════════════════════
   //  NOTIFICACIONES PUSH NATIVAS (FCM)
@@ -135,10 +204,10 @@ export default function App() {
       console.warn('⚠️ Error creando canal push:', e);
     }
 
-    // Pedir permisos con verificación previa
     try {
       const checkResult = await PushNotifications.checkPermissions();
       console.log('📋 Estado de permisos push actual:', checkResult.receive);
+      setNotificationPermission(checkResult.receive as NotificationPermState);
 
       let perm = checkResult;
 
@@ -146,11 +215,11 @@ export default function App() {
         console.log('🔔 Solicitando permiso de notificaciones...');
         perm = await PushNotifications.requestPermissions();
         console.log('📋 Resultado de la solicitud push:', perm.receive);
+        setNotificationPermission(perm.receive as NotificationPermState);
       }
 
       if (perm.receive !== 'granted') {
-        console.warn('❌ Permiso de notificaciones no concedido. El usuario puede habilitarlo luego desde ajustes del celular si lo desea.');
-        // 🔕 Ya NO mostramos confirm() ni alert() que confundan al usuario.
+        console.warn('❌ Permiso de notificaciones no concedido. El usuario puede activarlo desde el botón de campana en el mapa.');
         return;
       }
 
@@ -162,7 +231,6 @@ export default function App() {
       return;
     }
 
-    // Escuchar registro y guardar token
     PushNotifications.addListener('registration', async (token) => {
       console.log('📱 Token FCM pasajero:', token.value.substring(0, 25) + '...');
 
@@ -251,18 +319,15 @@ export default function App() {
     let locationGranted = false;
     try {
       if (Capacitor.isNativePlatform()) {
-        // En APK usamos Capacitor Geolocation
         const locPerm = await Geolocation.requestPermissions();
         locationGranted = locPerm.location === 'granted' || locPerm.coarseLocation === 'granted';
         console.log('📍 Resultado permiso ubicación (nativo):', locPerm);
       } else if ('geolocation' in navigator && navigator.permissions) {
-        // En web usamos la Permissions API
         try {
           const result = await navigator.permissions.query({ name: 'geolocation' as PermissionName });
           if (result.state === 'granted') {
             locationGranted = true;
           } else {
-            // Pedimos la ubicación una vez para gatillar el prompt
             await new Promise<void>((resolve) => {
               navigator.geolocation.getCurrentPosition(
                 () => { locationGranted = true; resolve(); },
@@ -272,7 +337,6 @@ export default function App() {
             });
           }
         } catch {
-          // Si falla la Permissions API, intentamos pedir directamente
           await new Promise<void>((resolve) => {
             navigator.geolocation.getCurrentPosition(
               () => { locationGranted = true; resolve(); },
@@ -289,7 +353,6 @@ export default function App() {
     console.log(locationGranted ? '✅ Ubicación concedida' : '❌ Ubicación rechazada');
 
     // ═══ PASO 2: Pedir permiso de NOTIFICACIONES ═══
-    // Solo después de que el usuario haya respondido al de ubicación
     setStatusNotification('🔔 Solicitando permiso de notificaciones...');
     console.log('🔔 [2/2] Solicitando permiso de notificaciones...');
 
@@ -299,10 +362,13 @@ export default function App() {
       console.warn('⚠️ Error pidiendo permiso de notificaciones:', e);
     }
 
-    // ═══ LISTO: Ambos permisos gestionados ═══
+    // Refrescar estado después de la solicitud
+    setTimeout(() => refreshNotificationPermission(), 500);
+
+    // ═══ LISTO ═══
     setStatusNotification(null);
     console.log('✅ Secuencia de permisos completada');
-  }, [setupPushNotificationsForPassenger]);
+  }, [setupPushNotificationsForPassenger, refreshNotificationPermission]);
 
   useEffect(() => {
     const activePassenger = getCurrentPassenger();
@@ -315,15 +381,7 @@ export default function App() {
 
     setIsSupabaseConnected(isSupabaseConfigured());
 
-    // ══════════════════════════════════════════════════════════════
-    //  ORQUESTACIÓN AL INICIAR LA APP:
-    //  1. Cuenta fantasma (en background)
-    //  2. Permiso de ubicación
-    //  3. Permiso de notificaciones
-    //  4. Ubicación GPS real
-    // ══════════════════════════════════════════════════════════════
     const initializeApp = async () => {
-      // --- Cuenta fantasma (silencioso, no bloqueante) ---
       if (!activePassenger && !ghostCreationStartedRef.current && isSupabaseConfigured()) {
         ghostCreationStartedRef.current = true;
         try {
@@ -339,7 +397,6 @@ export default function App() {
         savePendingPushToken(activePassenger.id);
       }
 
-      // --- Secuencia de permisos: Ubicación → Notificaciones ---
       await requestInitialPermissionsInSequence();
     };
 
@@ -362,7 +419,6 @@ export default function App() {
       }
     };
 
-    // Una vez pedidos los permisos, obtenemos la ubicación
     const startLocationTracking = async () => {
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
@@ -402,7 +458,6 @@ export default function App() {
       }
     };
 
-    // Esperamos un poco antes de arrancar el tracking para dar tiempo a los permisos
     setTimeout(() => {
       startLocationTracking();
     }, 500);
@@ -592,9 +647,6 @@ export default function App() {
     setTimeout(() => setStatusNotification(null), 3000);
   };
 
-  // ═══════════════════════════════════════════════════════════════
-  // CREAR RIDE — ASIGNACIÓN AUTOMÁTICA
-  // ═══════════════════════════════════════════════════════════════
   const handleRequestRide = async (rideType: 'moto' | 'express' = 'moto', customPrice?: number) => {
     if (!origin || !destination) return;
 
@@ -896,6 +948,8 @@ export default function App() {
         }}
         onSelectPOIAsTarget={handleSelectPOIAsTarget}
         onLocateUser={handleLocateUser}
+        notificationPermission={notificationPermission}
+        onRequestNotificationPermission={openNotificationSettings}
       />
 
       {rideStatus === 'solicitando' && activeRide && (
