@@ -1,4 +1,4 @@
-// src/services/supabaseClient.ts — VERSIÓN v4 (asignación automática de conductor)
+// src/services/supabaseClient.ts — VERSIÓN v5 (cuenta fantasma automática)
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { SupabaseRide, SupabaseDriver, SupabasePassenger, LatLng, PricingConfig, DriverViewInfo } from '../types';
 
@@ -75,6 +75,7 @@ export async function testSupabaseConnection(): Promise<{ success: boolean; mess
 // ═══════════════════════════════════════════════════════════════
 
 const PASSENGER_SESSION_KEY = 'motocampeon_passenger_session';
+const DEVICE_ID_KEY = 'motocampeon_device_id';
 
 export function getCurrentPassenger(): SupabasePassenger | null {
   try {
@@ -100,6 +101,72 @@ export function setCurrentPassenger(passenger: SupabasePassenger | null): void {
       localStorage.removeItem('motocampeon_passenger_ci');
     }
   } catch (e) { console.warn('Error writing passenger session:', e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 👻 CUENTA FANTASMA AUTOMÁTICA — Sin fricción
+// ═══════════════════════════════════════════════════════════════
+
+export function getOrCreateDeviceId(): string {
+  try {
+    let deviceId = localStorage.getItem(DEVICE_ID_KEY);
+    if (!deviceId) {
+      // Generar un ID único del dispositivo
+      const rand = (typeof crypto !== 'undefined' && (crypto as any)?.randomUUID)
+        ? (crypto as any).randomUUID()
+        : (Date.now().toString(36) + Math.random().toString(36).substring(2, 10));
+      deviceId = 'dev-' + String(rand).replace(/-/g, '').substring(0, 20);
+      localStorage.setItem(DEVICE_ID_KEY, deviceId);
+      console.log('🆔 Device ID generado:', deviceId);
+    }
+    return deviceId;
+  } catch {
+    const fallback = 'dev-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+    return fallback;
+  }
+}
+
+export async function createGhostPassengerIfNeeded(): Promise<SupabasePassenger | null> {
+  // Si ya hay sesión activa, devolverla
+  const existing = getCurrentPassenger();
+  if (existing?.id) {
+    console.log('👤 Pasajero ya existente:', existing.full_name);
+    return existing;
+  }
+
+  const client = getSupabase();
+  if (!client) return null;
+
+  try {
+    const deviceId = getOrCreateDeviceId();
+
+    // Generar nombre amigable aleatorio: "Pasajero 4271"
+    const randomNum = Math.floor(1000 + Math.random() * 9000);
+    const ghostName = `Pasajero ${randomNum}`;
+
+    console.log('👻 Creando cuenta fantasma:', ghostName);
+
+    // Usar el device_id como CI (identificador único interno)
+    // y dejar el teléfono vacío para que se vea limpio
+    const { data, error } = await client.rpc('register_or_update_passenger', {
+      p_full_name: ghostName,
+      p_phone: '',
+      p_ci: deviceId
+    });
+
+    if (error || !data || (data as any).error) {
+      console.warn('[Ghost] Error creando pasajero fantasma:', error?.message || (data as any)?.error);
+      return null;
+    }
+
+    const passenger = data as SupabasePassenger;
+    setCurrentPassenger(passenger);
+    console.log('✅ Cuenta fantasma creada:', passenger.full_name, '| id:', passenger.id);
+    return passenger;
+  } catch (err) {
+    console.warn('[Ghost] Excepción:', err);
+    return null;
+  }
 }
 
 export async function registerPassenger(
@@ -138,8 +205,8 @@ export async function registerPassenger(
       return { passenger: null, error: error.message };
     }
 
-    if (data?.error) {
-      return { passenger: null, error: data.error };
+    if ((data as any)?.error) {
+      return { passenger: null, error: (data as any).error };
     }
 
     const passenger = data as SupabasePassenger;
@@ -185,11 +252,11 @@ export async function loginPassenger(
       return { passenger: null, error: error.message };
     }
 
-    if (!data?.found || !data?.passenger) {
+    if (!(data as any)?.found || !(data as any)?.passenger) {
       return { passenger: null, error: `No encontramos cuenta con CI "${cleanCi}". Regístrate.` };
     }
 
-    const passenger = data.passenger as SupabasePassenger;
+    const passenger = (data as any).passenger as SupabasePassenger;
     setCurrentPassenger(passenger);
     return { passenger, error: null };
   } catch (err: any) {
@@ -205,8 +272,8 @@ export async function updatePassengerProfile(
   const cleanPhone = phone.trim();
   const cleanCi = ci.trim();
 
-  if (!cleanName || !cleanPhone || !cleanCi) {
-    return { success: false, error: 'Todos los campos son obligatorios.' };
+  if (!cleanName) {
+    return { success: false, error: 'El nombre es obligatorio.' };
   }
 
   const current = getCurrentPassenger();
@@ -214,7 +281,7 @@ export async function updatePassengerProfile(
     id: passengerId,
     full_name: cleanName,
     phone: cleanPhone,
-    ci: cleanCi,
+    ci: cleanCi || current?.ci || '',
     created_at: current?.created_at || new Date().toISOString()
   };
 
@@ -228,7 +295,7 @@ export async function updatePassengerProfile(
       p_id: passengerId,
       p_full_name: cleanName,
       p_phone: cleanPhone,
-      p_ci: cleanCi
+      p_ci: cleanCi || current?.ci || ''
     });
 
     if (error) {
@@ -236,11 +303,11 @@ export async function updatePassengerProfile(
       return { success: false, error: error.message };
     }
 
-    if (!data?.success) {
-      return { success: false, error: data?.error || 'Error al actualizar' };
+    if (!(data as any)?.success) {
+      return { success: false, error: (data as any)?.error || 'Error al actualizar' };
     }
 
-    const final = data.passenger as SupabasePassenger;
+    const final = (data as any).passenger as SupabasePassenger;
     setCurrentPassenger(final);
     return { success: true, passenger: final };
   } catch (err: any) {
@@ -293,9 +360,9 @@ export async function getOrCreatePassenger(passengerInfo?: {
   if (!client) return null;
 
   try {
-    const phone = passengerInfo?.phone || localStorage.getItem('motocampeon_passenger_phone') || '+591 70001234';
-    const fullName = passengerInfo?.fullName || localStorage.getItem('motocampeon_passenger_name') || 'Pasajero Moto Campeón';
-    const ci = passengerInfo?.ci || localStorage.getItem('motocampeon_passenger_ci') || '7891234';
+    const phone = passengerInfo?.phone || localStorage.getItem('motocampeon_passenger_phone') || '';
+    const fullName = passengerInfo?.fullName || localStorage.getItem('motocampeon_passenger_name') || `Pasajero ${Math.floor(1000 + Math.random() * 9000)}`;
+    const ci = passengerInfo?.ci || localStorage.getItem('motocampeon_passenger_ci') || getOrCreateDeviceId();
 
     const { data, error } = await client.rpc('register_or_update_passenger', {
       p_full_name: fullName,
@@ -303,8 +370,8 @@ export async function getOrCreatePassenger(passengerInfo?: {
       p_ci: ci
     });
 
-    if (error || !data || data.error) {
-      console.warn('[getOrCreatePassenger] RPC falló:', error?.message || data?.error);
+    if (error || !data || (data as any).error) {
+      console.warn('[getOrCreatePassenger] RPC falló:', error?.message || (data as any)?.error);
       return null;
     }
 
@@ -366,7 +433,7 @@ export async function createRideInSupabase(rideData: {
   price: number; distanceKm: number; durationMins: number;
   hasCargo: boolean; cargoDescription?: string; cargoPhotoUrl?: string;
   passengerName?: string; passengerPhone?: string;
-  targetDriverId?: string | null;   // 🎯 NUEVO
+  targetDriverId?: string | null;
 }): Promise<{ ride: SupabaseRide | null; error: string | null }> {
   const client = getSupabase();
   if (!client) return { ride: null, error: 'Supabase no está configurado.' };
@@ -409,12 +476,7 @@ export async function createRideInSupabase(rideData: {
 
     const createdRide = data as SupabaseRide;
 
-    // ══════════════════════════════════════════════════════════════
     // 🎯 ASIGNACIÓN AUTOMÁTICA AL CONDUCTOR MÁS CERCANO
-    // Si targetDriverId viene con valor, actualizamos el ride para
-    // que SOLO ese conductor reciba la notificación push.
-    // Si falla, el ride queda como pool abierto (no rompemos nada).
-    // ══════════════════════════════════════════════════════════════
     if (rideData.targetDriverId && createdRide?.id) {
       const { error: assignErr } = await client
         .from('rides')
@@ -426,7 +488,6 @@ export async function createRideInSupabase(rideData: {
         console.log('✅ [RIDE] Asignado automáticamente a:', rideData.targetDriverId);
       } else {
         console.warn('⚠️ [RIDE] No se pudo asignar automáticamente:', assignErr.message);
-        console.warn('   → El ride quedará en modo pool (todos reciben notificación)');
       }
     }
 
@@ -575,13 +636,13 @@ export function subscribeToRideChanges(
         p_ride_id: rideId
       });
 
-      if (error || !data || data.error) {
+      if (error || !data || (data as any).error) {
         return;
       }
 
-      const ride = data.ride as SupabaseRide;
-      const driver = data.driver as SupabaseDriver | null;
-      const viewersRaw = data.viewed_by_drivers || [];
+      const ride = (data as any).ride as SupabaseRide;
+      const driver = (data as any).driver as SupabaseDriver | null;
+      const viewersRaw = (data as any).viewed_by_drivers || [];
       const viewers = Array.isArray(viewersRaw)
         ? viewersRaw.filter((v: any) => v && typeof v === 'object' && v.driver_id)
         : [];
@@ -645,7 +706,7 @@ export async function updateRideStatusInSupabase(
       return false;
     }
 
-    return !!data?.success;
+    return !!(data as any)?.success;
   } catch (err) {
     console.error('[cancelRide] excepción:', err);
     return false;
