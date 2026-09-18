@@ -134,15 +134,29 @@ export default function App() {
     }
 
     // 2. Pedir permisos
+      // 2. Pedir permisos (con verificación previa para Android 13+)
     try {
-      const perm = await PushNotifications.requestPermissions();
-      if (perm.receive !== 'granted') {
-        console.warn('❌ Permiso de notificaciones denegado');
-        return;
+      // Primero verificamos si ya tenemos el permiso
+      const checkResult = await PushNotifications.checkPermissions();
+      console.log('📋 Estado de permisos actual:', checkResult.receive);
+
+      if (checkResult.receive !== 'granted') {
+        console.log('🔔 Solicitando permiso de notificaciones...');
+        const perm = await PushNotifications.requestPermissions();
+        console.log('📋 Resultado de la solicitud:', perm.receive);
+
+        if (perm.receive !== 'granted') {
+          console.warn('❌ Permiso de notificaciones denegado por el usuario.');
+          // Aquí podrías mostrar un mensaje en la UI indicando que debe activar las notificaciones manualmente
+          return;
+        }
       }
+
+      console.log('✅ Permiso concedido, registrando dispositivo...');
       await PushNotifications.register();
+
     } catch (e) {
-      console.error('❌ Error en registro push:', e);
+      console.error('❌ Error en el registro push:', e);
       return;
     }
 
