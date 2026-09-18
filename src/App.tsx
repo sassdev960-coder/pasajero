@@ -32,7 +32,8 @@ import {
   submitDriverRating,
   uploadCargoPhoto,
   findClosestOnlineDriver,
-  getSupabase
+  getSupabase,
+  createGhostPassengerIfNeeded
 } from './services/supabaseClient';
 
 const DEFAULT_CENTER: LatLng = { lat: -17.7833, lng: -63.1821 };
@@ -98,12 +99,12 @@ export default function App() {
   const geocodeTimerRef = useRef<any>(null);
   const hasCenteredInitialRef = useRef(false);
   const pushSetupDoneRef = useRef(false);
+  const ghostCreationStartedRef = useRef(false);
 
   // ═══════════════════════════════════════════════════════════════
   //  NOTIFICACIONES PUSH NATIVAS (FCM)
   // ═══════════════════════════════════════════════════════════════
   const setupPushNotificationsForPassenger = useCallback(async () => {
-    // Solo en APK (nativo), no en web
     if (!Capacitor.isNativePlatform()) {
       console.log('ℹ️ PushNotifications: modo web, no se configura');
       return;
@@ -116,13 +117,12 @@ export default function App() {
     pushSetupDoneRef.current = true;
 
     try {
-      // 1. Crear canal de alta prioridad
       await PushNotifications.createChannel({
         id: 'passenger_updates',
         name: 'Actualizaciones de Viaje',
         description: 'Estado de tus viajes (conductor asignado, llegada, etc.)',
-        importance: 5,        // MAX
-        visibility: 1,        // PUBLIC
+        importance: 5,
+        visibility: 1,
         sound: 'default',
         vibration: true,
         lights: true,
@@ -133,23 +133,39 @@ export default function App() {
       console.warn('⚠️ Error creando canal push:', e);
     }
 
-    // 2. Pedir permisos
-      // 2. Pedir permisos (con verificación previa para Android 13+)
+    // 2. Pedir permisos con verificación previa
     try {
-      // Primero verificamos si ya tenemos el permiso
       const checkResult = await PushNotifications.checkPermissions();
       console.log('📋 Estado de permisos actual:', checkResult.receive);
 
+      let perm = checkResult;
+
       if (checkResult.receive !== 'granted') {
         console.log('🔔 Solicitando permiso de notificaciones...');
-        const perm = await PushNotifications.requestPermissions();
+        perm = await PushNotifications.requestPermissions();
         console.log('📋 Resultado de la solicitud:', perm.receive);
+      }
 
-        if (perm.receive !== 'granted') {
-          console.warn('❌ Permiso de notificaciones denegado por el usuario.');
-          // Aquí podrías mostrar un mensaje en la UI indicando que debe activar las notificaciones manualmente
-          return;
-        }
+      if (perm.receive !== 'granted') {
+        console.warn('❌ Permiso de notificaciones denegado. El usuario debe habilitarlo manualmente.');
+        setTimeout(() => {
+          if (confirm(
+            '🔔 Las notificaciones están desactivadas.\n\n' +
+            'Para recibir avisos de tu viaje (conductor en camino, llegada, etc.) ' +
+            'necesitas activarlas en los ajustes del sistema.\n\n' +
+            '¿Quieres abrir los ajustes ahora?'
+          )) {
+            alert(
+              '📱 Instrucciones manuales:\n\n' +
+              '1. Abre Ajustes del celular\n' +
+              '2. Ve a Aplicaciones → Moto Móvil Pasajero\n' +
+              '3. Entra a Notificaciones\n' +
+              '4. Activa "Permitir notificaciones"\n' +
+              '5. Vuelve a abrir la app'
+            );
+          }
+        }, 1500);
+        return;
       }
 
       console.log('✅ Permiso concedido, registrando dispositivo...');
@@ -160,11 +176,10 @@ export default function App() {
       return;
     }
 
-    // 3. Guardar el token en Supabase (asociado al pasajero actual)
+    // 3. Escuchar registro y guardar token
     PushNotifications.addListener('registration', async (token) => {
       console.log('📱 Token FCM pasajero:', token.value.substring(0, 25) + '...');
 
-      // Obtener el pasajero actual
       const passenger = getCurrentPassenger();
       if (!passenger?.id) {
         console.warn('⚠️ No hay pasajero logueado, guardando token en localStorage');
@@ -172,7 +187,6 @@ export default function App() {
         return;
       }
 
-      // Guardar en Supabase vía RPC
       try {
         const client = getSupabase();
         if (client) {
@@ -195,21 +209,15 @@ export default function App() {
       console.error('❌ Error FCM:', JSON.stringify(error));
     });
 
-    // 4. Cuando el pasajero toca la notificación
     PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
       console.log('👆 Notificación tocada:', notification);
-      // La app se abre sola; el estado de la UI ya está en pantalla por el flujo normal
     });
 
-    // 5. Log si llega en foreground
     PushNotifications.addListener('pushNotificationReceived', (notification) => {
       console.log('🔔 Push recibido en foreground:', notification.title);
     });
   }, []);
 
-  // ═══════════════════════════════════════════════════════════════
-  //  GUARDAR TOKEN PENDIENTE SI EL PASAJERO SE LOGUEA DESPUÉS
-  // ═══════════════════════════════════════════════════════════════
   const savePendingPushToken = useCallback(async (passengerId: string) => {
     const pendingToken = localStorage.getItem('motocampeon_passenger_fcm_token');
     if (!pendingToken) return;
@@ -254,14 +262,29 @@ export default function App() {
 
     setIsSupabaseConnected(isSupabaseConfigured());
 
-    // 🎯 Configurar push si ya hay sesión activa
-    if (activePassenger) {
+    // 👻 Auto-crear cuenta fantasma si no hay sesión (solo 1 vez)
+    if (!activePassenger && !ghostCreationStartedRef.current && isSupabaseConfigured()) {
+      ghostCreationStartedRef.current = true;
+      createGhostPassengerIfNeeded().then(p => {
+        if (p) {
+          setCurrentPassenger(p);
+          savePendingPushToken(p.id);
+          setTimeout(() => {
+            pushSetupDoneRef.current = false;
+            setupPushNotificationsForPassenger();
+          }, 300);
+        } else {
+          // Si no se pudo crear la fantasma, igual intentamos configurar push
+          setTimeout(() => setupPushNotificationsForPassenger(), 500);
+        }
+      });
+    } else if (activePassenger) {
+      // Ya hay sesión: guardar token pendiente + configurar push
       savePendingPushToken(activePassenger.id);
-      setTimeout(() => setupPushNotificationsForPassenger(), 800);
+      setTimeout(() => setupPushNotificationsForPassenger(), 500);
     } else {
-      // Sin sesión: configuramos igual para capturar el token,
-      // pero se guardará en localStorage hasta que el pasajero se loguee
-      setTimeout(() => setupPushNotificationsForPassenger(), 1200);
+      // Sin Supabase configurado: igual intentamos configurar push
+      setTimeout(() => setupPushNotificationsForPassenger(), 800);
     }
 
     let watchId: number | null = null;
@@ -517,11 +540,6 @@ export default function App() {
       ? customPrice 
       : (rideType === 'express' ? fare.expressFare : fare.motoFare);
 
-    // ══════════════════════════════════════════════════════════════
-    //  🎯 ASIGNACIÓN AUTOMÁTICA
-    //  Intenta asignar al conductor más cercano en un radio de 3 km.
-    //  Si no hay ninguno → cae automáticamente a modo pool abierto.
-    // ══════════════════════════════════════════════════════════════
     let targetDriverId: string | null = null;
     
     if (isSupabaseConfigured()) {
@@ -582,7 +600,7 @@ export default function App() {
         cargoPhotoUrl: finalCargoPhotoUrl,
         passengerName: currentPassenger?.full_name || undefined,
         passengerPhone: currentPassenger?.phone || undefined,
-        targetDriverId   // 🎯 null si no hay nadie cerca (pool), uuid si se asignó
+        targetDriverId
       });
 
       if (dbRide) {
@@ -954,11 +972,10 @@ export default function App() {
         currentPassenger={currentPassenger}
         onPassengerChanged={(p) => {
           setCurrentPassenger(p);
-          // 🎯 Re-configurar push cuando el pasajero cambia (login o registro)
           if (p) {
             savePendingPushToken(p.id);
             setTimeout(() => {
-              pushSetupDoneRef.current = false; // Permitir re-configurar
+              pushSetupDoneRef.current = false;
               setupPushNotificationsForPassenger();
             }, 500);
           }
