@@ -14,7 +14,8 @@ import {
   ShieldCheck, 
   Sparkles,
   ArrowRight,
-  Loader2
+  Loader2,
+  Ghost
 } from 'lucide-react';
 import { SupabasePassenger, SupabaseRide, RideRequest } from '../types';
 import { 
@@ -44,22 +45,17 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
   onRepeatRide,
   localHistory = []
 }) => {
-  // Auth view mode: 'login' | 'register'
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  // Profile tab mode: 'profile' | 'history'
   const [profileTab, setProfileTab] = useState<'profile' | 'history'>('profile');
 
-  // Form states
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [ci, setCi] = useState('');
 
-  // Status & Feedback
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Stats & Passenger Rides
   const [stats, setStats] = useState<{ totalRides: number; completedRides: number; totalKm: number; totalSpent: number }>({
     totalRides: 0,
     completedRides: 0,
@@ -69,7 +65,9 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
   const [ridesHistory, setRidesHistory] = useState<SupabaseRide[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-  // Sync inputs when currentPassenger changes or modal opens
+  // Detectar si es cuenta fantasma
+  const isGhostAccount = Boolean(currentPassenger?.ci?.startsWith('dev-'));
+
   useEffect(() => {
     if (isOpen) {
       setErrorMessage(null);
@@ -96,7 +94,6 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
         getPassengerRidesHistory(passengerId)
       ]);
 
-      // Calculate total km from Supabase rides + any local rides fallback
       let combinedKm = fetchedStats.totalKm;
       let combinedRides = fetchedStats.totalRides;
       let combinedSpent = fetchedStats.totalSpent;
@@ -124,7 +121,6 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
 
   if (!isOpen) return null;
 
-  // Handle Login: requires Name and CI
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -148,7 +144,6 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
     }
   };
 
-  // Handle Registration: requires Name, Phone, and CI
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -172,7 +167,6 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
     }
   };
 
-  // Handle Profile Update
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentPassenger) return;
@@ -181,7 +175,13 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
     setSuccessMessage(null);
     setIsLoading(true);
 
-    const result = await updatePassengerProfile(currentPassenger.id, fullName, phone, ci);
+    // Al personalizar una cuenta fantasma, mantener su CI internamente
+    // pero permitir vacío en el campo visual
+    const finalCi = isGhostAccount && !ci.trim() 
+      ? currentPassenger.ci  // mantener el device_id
+      : ci;
+
+    const result = await updatePassengerProfile(currentPassenger.id, fullName, phone, finalCi);
     setIsLoading(false);
 
     if (result.success && result.passenger) {
@@ -193,7 +193,6 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
     }
   };
 
-  // Handle Logout
   const handleLogout = () => {
     setCurrentPassenger(null);
     onPassengerChanged(null);
@@ -213,19 +212,26 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
-              <User className="w-5 h-5" />
+              {isGhostAccount ? <Ghost className="w-5 h-5" /> : <User className="w-5 h-5" />}
             </div>
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-1.5">
-                {currentPassenger ? 'Mi Perfil de Pasajero' : 'Cuenta de Pasajero'}
+                {currentPassenger ? (isGhostAccount ? 'Cuenta Rápida' : 'Mi Perfil de Pasajero') : 'Cuenta de Pasajero'}
                 {currentPassenger && (
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-extrabold px-1.5 py-0.5 rounded-full">
-                    Activo
+                  <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded-full border ${
+                    isGhostAccount 
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                  }`}>
+                    {isGhostAccount ? 'Rápida' : 'Activo'}
                   </span>
                 )}
               </h3>
               <p className="text-xs text-slate-400">
-                {currentPassenger ? 'Datos, estadísticas e historial de carreras' : 'Ingresa o regístrate en Moto Campeón'}
+                {currentPassenger 
+                  ? (isGhostAccount ? 'Personaliza tus datos cuando quieras' : 'Datos, estadísticas e historial')
+                  : 'Ingresa o regístrate en Moto Campeón'
+                }
               </p>
             </div>
           </div>
@@ -255,12 +261,8 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
         {/* Body Container */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
           
-          {/* ==================================================== */}
-          {/* VIEW A: NOT LOGGED IN (LOGIN / REGISTER TABS) */}
-          {/* ==================================================== */}
           {!currentPassenger ? (
             <div className="space-y-4">
-              {/* Tabs Switcher */}
               <div className="flex rounded-2xl bg-slate-950 p-1 border border-slate-800">
                 <button
                   type="button"
@@ -292,7 +294,6 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
                 </button>
               </div>
 
-              {/* Login Form */}
               {authMode === 'login' && (
                 <form onSubmit={handleLogin} className="space-y-3.5">
                   <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80 space-y-3">
@@ -362,7 +363,6 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
                 </form>
               )}
 
-              {/* Register Form */}
               {authMode === 'register' && (
                 <form onSubmit={handleRegister} className="space-y-3.5">
                   <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80 space-y-3">
@@ -443,24 +443,49 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
               )}
             </div>
           ) : (
-            /* ==================================================== */
-            /* VIEW B: LOGGED IN (PROFILE, STATS, EDIT, HISTORY) */
-            /* ==================================================== */
             <div className="space-y-4">
+              {/* 👻 Banner cuenta fantasma */}
+              {isGhostAccount && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3.5 text-xs">
+                  <div className="flex items-start gap-2.5">
+                    <Ghost className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <div className="font-bold text-amber-300 mb-1">
+                        Estás usando una cuenta rápida
+                      </div>
+                      <p className="text-slate-300 leading-relaxed">
+                        Puedes pedir viajes sin problemas. Si quieres guardar tu historial con tu nombre real, 
+                        agrega tus datos aquí abajo.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* User Profile Card */}
               <div className="bg-gradient-to-br from-slate-950 to-slate-900 p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-lg shadow-lg shadow-amber-500/20">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg shadow-lg ${
+                    isGhostAccount 
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'bg-amber-500 text-slate-950 shadow-amber-500/20'
+                  }`}>
                     {(currentPassenger.full_name || 'P').charAt(0).toUpperCase()}
                   </div>
                   <div>
                     <div className="font-extrabold text-white text-base">
-                      {currentPassenger.full_name || 'Pasajero Moto Campeón'}
+                      {currentPassenger.full_name || 'Pasajero'}
                     </div>
                     <div className="text-xs text-slate-400 flex items-center gap-2">
-                      <span>CI: {currentPassenger.ci || 'No registrado'}</span>
-                      <span>•</span>
-                      <span>{currentPassenger.phone}</span>
+                      {isGhostAccount ? (
+                        <span className="text-amber-400">Cuenta rápida • Agrega tus datos abajo</span>
+                      ) : (
+                        <>
+                          <span>CI: {currentPassenger.ci || 'No registrado'}</span>
+                          <span>•</span>
+                          <span>{currentPassenger.phone || 'Sin teléfono'}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -474,7 +499,7 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
                 </button>
               </div>
 
-              {/* 3 Metric Cards: Kilómetros recorridos, Viajes, Gasto total */}
+              {/* 3 Metric Cards */}
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-3 flex flex-col justify-between">
                   <div className="flex items-center gap-1.5 text-[10px] font-bold text-amber-400 uppercase tracking-wider">
@@ -510,7 +535,7 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
                 </div>
               </div>
 
-              {/* Navigation Tabs between Profile Config and Rides History */}
+              {/* Navigation Tabs */}
               <div className="flex rounded-2xl bg-slate-950 p-1 border border-slate-800">
                 <button
                   type="button"
@@ -522,7 +547,7 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
                   }`}
                 >
                   <Settings className="w-3.5 h-3.5 text-amber-400" />
-                  Configuración del Perfil
+                  {isGhostAccount ? 'Personalizar Cuenta' : 'Configuración del Perfil'}
                 </button>
                 <button
                   type="button"
@@ -534,11 +559,11 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
                   }`}
                 >
                   <History className="w-3.5 h-3.5 text-emerald-400" />
-                  Historial de Carreras ({stats.totalRides})
+                  Historial ({stats.totalRides})
                 </button>
               </div>
 
-              {/* Tab 1: Profile Configuration Form */}
+              {/* Tab 1: Profile Form */}
               {profileTab === 'profile' && (
                 <form onSubmit={handleUpdateProfile} className="space-y-3.5">
                   <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-slate-800/80 space-y-3">
@@ -559,30 +584,32 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
                         <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                        Teléfono Móvil
+                        Teléfono Móvil {isGhostAccount && <span className="text-slate-500 font-normal">(opcional)</span>}
                       </label>
                       <input
                         type="tel"
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
-                        required
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 font-mono"
+                        placeholder="+591 7XXXXXXX"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-mono"
                       />
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-                        <CreditCard className="w-3.5 h-3.5 text-amber-400" />
-                        Cédula de Identidad (CI)
-                      </label>
-                      <input
-                        type="text"
-                        value={ci}
-                        onChange={(e) => setCi(e.target.value)}
-                        required
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500 font-mono"
-                      />
-                    </div>
+                    {!isGhostAccount && (
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+                          <CreditCard className="w-3.5 h-3.5 text-amber-400" />
+                          Cédula de Identidad (CI)
+                        </label>
+                        <input
+                          type="text"
+                          value={ci}
+                          onChange={(e) => setCi(e.target.value)}
+                          required
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500 font-mono"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <button
@@ -598,14 +625,14 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
                     ) : (
                       <>
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        Guardar Configuración de Perfil
+                        {isGhostAccount ? 'Guardar mis datos' : 'Guardar Configuración'}
                       </>
                     )}
                   </button>
                 </form>
               )}
 
-              {/* Tab 2: Passenger Rides History */}
+              {/* Tab 2: History */}
               {profileTab === 'history' && (
                 <div className="space-y-3">
                   {isLoadingHistory ? (
