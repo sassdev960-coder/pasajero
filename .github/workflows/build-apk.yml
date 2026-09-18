@@ -35,7 +35,7 @@ jobs:
         run: npm install --legacy-peer-deps
 
       - name: 📱 Instalar Capacitor
-        run: npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest @capacitor/geolocation@latest --legacy-peer-deps
+        run: npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest @capacitor/geolocation@latest @capacitor/push-notifications@latest --legacy-peer-deps
 
       - name: 🏗️ Compilar app web (Vite)
         run: npm run build
@@ -46,13 +46,28 @@ jobs:
       - name: 📱 Añadir plataforma Android
         run: |
           npx cap add android
-          npx cap sync android
+
+      - name: 🔥 Inyectar google-services.json
+        run: |
+          mkdir -p android/app
+          echo '${{ secrets.GOOGLE_SERVICES_JSON_PASAJERO }}' > android/app/google-services.json
+          echo "google-services.json inyectado:"
+          head -c 200 android/app/google-services.json
 
       - name: 🔓 Añadir permisos al AndroidManifest
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          sed -i '/<application/i\    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />' $MANIFEST
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />' $MANIFEST
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />' $MANIFEST
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.WAKE_LOCK" />' $MANIFEST
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />' $MANIFEST
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' $MANIFEST
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.VIBRATE" />' $MANIFEST
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />' $MANIFEST
           echo "✅ Permisos añadidos"
+
+      - name: 🔄 Sync Capacitor
+        run: npx cap sync android
 
       - name: 🔨 Compilar APK
         run: |
