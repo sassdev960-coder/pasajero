@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { PushNotifications } from '@capacitor/push-notifications';
+import { Capacitor } from '@capacitor/core';
 import { LatLng, PointOfInterest, RideRequest, Driver, PricingConfig, SupabaseDriver, SupabasePassenger, DriverViewInfo } from './types';
 import { calculateRoute, calculateFare } from './services/routingService';
 import { reverseGeocode, detectUserLocationViaIP } from './services/geocodingService';
@@ -29,7 +31,8 @@ import {
   subscribeToOnlineDrivers,
   submitDriverRating,
   uploadCargoPhoto,
-  findClosestOnlineDriver   // 🎯 NUEVO
+  findClosestOnlineDriver,
+  getSupabase
 } from './services/supabaseClient';
 
 const DEFAULT_CENTER: LatLng = { lat: -17.7833, lng: -63.1821 };
@@ -94,6 +97,125 @@ export default function App() {
   const rideSubRef = useRef<(() => void) | null>(null);
   const geocodeTimerRef = useRef<any>(null);
   const hasCenteredInitialRef = useRef(false);
+  const pushSetupDoneRef = useRef(false);
+
+  // ═══════════════════════════════════════════════════════════════
+  //  NOTIFICACIONES PUSH NATIVAS (FCM)
+  // ═══════════════════════════════════════════════════════════════
+  const setupPushNotificationsForPassenger = useCallback(async () => {
+    // Solo en APK (nativo), no en web
+    if (!Capacitor.isNativePlatform()) {
+      console.log('ℹ️ PushNotifications: modo web, no se configura');
+      return;
+    }
+
+    if (pushSetupDoneRef.current) {
+      console.log('ℹ️ PushNotifications ya configuradas');
+      return;
+    }
+    pushSetupDoneRef.current = true;
+
+    try {
+      // 1. Crear canal de alta prioridad
+      await PushNotifications.createChannel({
+        id: 'passenger_updates',
+        name: 'Actualizaciones de Viaje',
+        description: 'Estado de tus viajes (conductor asignado, llegada, etc.)',
+        importance: 5,        // MAX
+        visibility: 1,        // PUBLIC
+        sound: 'default',
+        vibration: true,
+        lights: true,
+        lightColor: '#ff7a00'
+      });
+      console.log('📢 Canal passenger_updates creado');
+    } catch (e) {
+      console.warn('⚠️ Error creando canal push:', e);
+    }
+
+    // 2. Pedir permisos
+    try {
+      const perm = await PushNotifications.requestPermissions();
+      if (perm.receive !== 'granted') {
+        console.warn('❌ Permiso de notificaciones denegado');
+        return;
+      }
+      await PushNotifications.register();
+    } catch (e) {
+      console.error('❌ Error en registro push:', e);
+      return;
+    }
+
+    // 3. Guardar el token en Supabase (asociado al pasajero actual)
+    PushNotifications.addListener('registration', async (token) => {
+      console.log('📱 Token FCM pasajero:', token.value.substring(0, 25) + '...');
+
+      // Obtener el pasajero actual
+      const passenger = getCurrentPassenger();
+      if (!passenger?.id) {
+        console.warn('⚠️ No hay pasajero logueado, guardando token en localStorage');
+        localStorage.setItem('motocampeon_passenger_fcm_token', token.value);
+        return;
+      }
+
+      // Guardar en Supabase vía RPC
+      try {
+        const client = getSupabase();
+        if (client) {
+          const { error } = await client.rpc('save_passenger_fcm_token', {
+            p_passenger_id: passenger.id,
+            p_fcm_token: token.value
+          });
+          if (error) {
+            console.error('❌ Error guardando token en Supabase:', error.message);
+          } else {
+            console.log('✅ Token FCM pasajero guardado en Supabase');
+          }
+        }
+      } catch (e) {
+        console.error('❌ Excepción guardando token:', e);
+      }
+    });
+
+    PushNotifications.addListener('registrationError', (error) => {
+      console.error('❌ Error FCM:', JSON.stringify(error));
+    });
+
+    // 4. Cuando el pasajero toca la notificación
+    PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
+      console.log('👆 Notificación tocada:', notification);
+      // La app se abre sola; el estado de la UI ya está en pantalla por el flujo normal
+    });
+
+    // 5. Log si llega en foreground
+    PushNotifications.addListener('pushNotificationReceived', (notification) => {
+      console.log('🔔 Push recibido en foreground:', notification.title);
+    });
+  }, []);
+
+  // ═══════════════════════════════════════════════════════════════
+  //  GUARDAR TOKEN PENDIENTE SI EL PASAJERO SE LOGUEA DESPUÉS
+  // ═══════════════════════════════════════════════════════════════
+  const savePendingPushToken = useCallback(async (passengerId: string) => {
+    const pendingToken = localStorage.getItem('motocampeon_passenger_fcm_token');
+    if (!pendingToken) return;
+
+    try {
+      const client = getSupabase();
+      if (client) {
+        const { error } = await client.rpc('save_passenger_fcm_token', {
+          p_passenger_id: passengerId,
+          p_fcm_token: pendingToken
+        });
+        if (!error) {
+          console.log('✅ Token pendiente guardado tras login');
+          localStorage.removeItem('motocampeon_passenger_fcm_token');
+        }
+      }
+    } catch (e) {
+      console.warn('Error guardando token pendiente:', e);
+    }
+  }, []);
 
   const applyOriginLocation = useCallback(async (coords: LatLng, fly = true) => {
     const lat = Number(coords?.lat);
@@ -117,6 +239,16 @@ export default function App() {
     } catch {}
 
     setIsSupabaseConnected(isSupabaseConfigured());
+
+    // 🎯 Configurar push si ya hay sesión activa
+    if (activePassenger) {
+      savePendingPushToken(activePassenger.id);
+      setTimeout(() => setupPushNotificationsForPassenger(), 800);
+    } else {
+      // Sin sesión: configuramos igual para capturar el token,
+      // pero se guardará en localStorage hasta que el pasajero se loguee
+      setTimeout(() => setupPushNotificationsForPassenger(), 1200);
+    }
 
     let watchId: number | null = null;
 
@@ -191,7 +323,7 @@ export default function App() {
       clearTimeout(fallbackTimer);
       if (watchId !== null && 'geolocation' in navigator) navigator.geolocation.clearWatch(watchId);
     };
-  }, [applyOriginLocation]);
+  }, [applyOriginLocation, setupPushNotificationsForPassenger, savePendingPushToken]);
 
   useEffect(() => {
     fetchPricingConfigFromSupabase().then(setPricingConfig);
@@ -375,7 +507,6 @@ export default function App() {
     //  🎯 ASIGNACIÓN AUTOMÁTICA
     //  Intenta asignar al conductor más cercano en un radio de 3 km.
     //  Si no hay ninguno → cae automáticamente a modo pool abierto.
-    //  El pasajero no ve ninguna decisión: todo es transparente.
     // ══════════════════════════════════════════════════════════════
     let targetDriverId: string | null = null;
     
@@ -807,7 +938,17 @@ export default function App() {
         isOpen={isPassengerModalOpen}
         onClose={() => setIsPassengerModalOpen(false)}
         currentPassenger={currentPassenger}
-        onPassengerChanged={(p) => setCurrentPassenger(p)}
+        onPassengerChanged={(p) => {
+          setCurrentPassenger(p);
+          // 🎯 Re-configurar push cuando el pasajero cambia (login o registro)
+          if (p) {
+            savePendingPushToken(p.id);
+            setTimeout(() => {
+              pushSetupDoneRef.current = false; // Permitir re-configurar
+              setupPushNotificationsForPassenger();
+            }, 500);
+          }
+        }}
         onRepeatRide={handleRepeatRide}
         localHistory={history}
       />
