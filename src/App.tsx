@@ -37,6 +37,7 @@ import {
 } from './services/supabaseClient';
 
 const DEFAULT_CENTER: LatLng = { lat: -17.7833, lng: -63.1821 };
+const ANDROID_PACKAGE_NAME = 'com.motomovil.pasajero';
 
 export default function App() {
   const [userLocation, setUserLocation] = useState<LatLng | null>(null);
@@ -79,11 +80,13 @@ export default function App() {
   const [driverRouteCoords, setDriverRouteCoords] = useState<[number, number][]>([]);
   const [driverDistanceMeters, setDriverDistanceMeters] = useState<number>(0);
 
-  // 🎯 NUEVO: panel unificado expandido/compacto
   const [panelExpanded, setPanelExpanded] = useState(false);
 
   const [onlineDrivers, setOnlineDrivers] = useState<SupabaseDriver[]>([]);
   const [viewedDrivers, setViewedDrivers] = useState<DriverViewInfo[]>([]);
+
+  // 🔔 Estado de notificaciones
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
 
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [isRatingOpen, setIsRatingOpen] = useState(false);
@@ -103,34 +106,77 @@ export default function App() {
   const pushSetupDoneRef = useRef(false);
   const ghostCreationStartedRef = useRef(false);
 
+  // ═══════════════════════════════════════════════════════════════
+  //  NOTIFICACIONES PUSH
+  // ═══════════════════════════════════════════════════════════════
+  const checkNotificationPermission = useCallback(async () => {
+    if (!Capacitor.isNativePlatform()) return;
+    try {
+      const result = await PushNotifications.checkPermissions();
+      setNotificationsEnabled(result.receive === 'granted');
+    } catch (e) {
+      console.warn('Error verificando permisos:', e);
+    }
+  }, []);
+
   const setupPushNotificationsForPassenger = useCallback(async () => {
-    if (!Capacitor.isNativePlatform()) { console.log('ℹ️ PushNotifications: modo web'); return; }
-    if (pushSetupDoneRef.current) return;
-    pushSetupDoneRef.current = true;
+    if (!Capacitor.isNativePlatform()) {
+      console.log('ℹ️ PushNotifications: modo web, no se configura');
+      return;
+    }
 
     try {
       await PushNotifications.createChannel({
-        id: 'passenger_updates', name: 'Actualizaciones de Viaje',
-        description: 'Estado de tus viajes', importance: 5, visibility: 1,
-        sound: 'default', vibration: true, lights: true, lightColor: '#ff7a00'
+        id: 'passenger_updates',
+        name: 'Actualizaciones de Viaje',
+        description: 'Estado de tus viajes (conductor asignado, llegada, etc.)',
+        importance: 5,
+        visibility: 1,
+        sound: 'default',
+        vibration: true,
+        lights: true,
+        lightColor: '#ff7a00'
       });
       console.log('📢 Canal passenger_updates creado');
-    } catch (e) { console.warn('⚠️ Error creando canal push:', e); }
+    } catch (e) {
+      console.warn('⚠️ Error creando canal push:', e);
+    }
 
+    // Verificar estado actual sin forzar diálogo
+    await checkNotificationPermission();
+
+    if (pushSetupDoneRef.current) {
+      console.log('ℹ️ Listeners ya configurados');
+      return;
+    }
+    pushSetupDoneRef.current = true;
+
+    // Pedir permiso
     try {
       const checkResult = await PushNotifications.checkPermissions();
       let perm = checkResult;
+
       if (checkResult.receive !== 'granted') {
+        console.log('🔔 Solicitando permiso de notificaciones...');
         perm = await PushNotifications.requestPermissions();
       }
+
+      setNotificationsEnabled(perm.receive === 'granted');
+
       if (perm.receive !== 'granted') {
-        console.warn('❌ Permiso de notificaciones denegado');
+        console.warn('❌ Permiso denegado');
         return;
       }
+
+      console.log('✅ Permiso concedido, registrando dispositivo...');
       await PushNotifications.register();
-    } catch (e) { console.error('❌ Error en registro push:', e); return; }
+    } catch (e) {
+      console.error('❌ Error en registro push:', e);
+      return;
+    }
 
     PushNotifications.addListener('registration', async (token) => {
+      console.log('📱 Token FCM:', token.value.substring(0, 25) + '...');
       const passenger = getCurrentPassenger();
       if (!passenger?.id) {
         localStorage.setItem('motocampeon_passenger_fcm_token', token.value);
@@ -138,13 +184,93 @@ export default function App() {
       }
       try {
         const client = getSupabase();
-        if (client) await client.rpc('save_passenger_fcm_token', { p_passenger_id: passenger.id, p_fcm_token: token.value });
+        if (client) {
+          const { error } = await client.rpc('save_passenger_fcm_token', {
+            p_passenger_id: passenger.id,
+            p_fcm_token: token.value
+          });
+          if (!error) console.log('✅ Token guardado en Supabase');
+        }
       } catch (e) { console.error('❌ Error guardando token:', e); }
     });
 
-    PushNotifications.addListener('registrationError', (e) => console.error('❌ FCM:', JSON.stringify(e)));
-    PushNotifications.addListener('pushNotificationActionPerformed', (n) => console.log('👆 Notif tocada'));
-    PushNotifications.addListener('pushNotificationReceived', (n) => console.log('🔔 Push:', n.title));
+    PushNotifications.addListener('registrationError', (error) => {
+      console.error('❌ Error FCM:', JSON.stringify(error));
+    });
+
+    PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
+      console.log('👆 Notificación tocada:', notification);
+    });
+
+    PushNotifications.addListener('pushNotificationReceived', (notification) => {
+      console.log('🔔 Push en foreground:', notification.title);
+    });
+  }, [checkNotificationPermission]);
+
+  // ═══════════════════════════════════════════════════════════════
+  //  🔔 TOGGLE / REACTIVAR PERMISOS DE NOTIFICACIÓN
+  // ═══════════════════════════════════════════════════════════════
+  const handleToggleNotifications = useCallback(async () => {
+    if (!Capacitor.isNativePlatform()) {
+      setStatusNotification('Solo disponible en la app');
+      setTimeout(() => setStatusNotification(null), 2000);
+      return;
+    }
+
+    try {
+      // 1. Verificar estado actual
+      const current = await PushNotifications.checkPermissions();
+      console.log('📋 Estado actual:', current.receive);
+
+      // 2. Si ya está concedido → toast informativo
+      if (current.receive === 'granted') {
+        setStatusNotification('✅ Notificaciones ya activadas');
+        setTimeout(() => setStatusNotification(null), 2500);
+        setNotificationsEnabled(true);
+        return;
+      }
+
+      // 3. Si está denegado → intentar pedir de nuevo
+      console.log('🔔 Re-solicitando permiso...');
+      const result = await PushNotifications.requestPermissions();
+      console.log('📋 Resultado:', result.receive);
+
+      if (result.receive === 'granted') {
+        setNotificationsEnabled(true);
+        setStatusNotification('✅ ¡Notificaciones activadas!');
+        setTimeout(() => setStatusNotification(null), 2500);
+        // Registrar de nuevo
+        await PushNotifications.register();
+      } else {
+        // 4. Si Android no muestra el diálogo (denegado permanente) → abrir ajustes
+        setNotificationsEnabled(false);
+        const shouldOpenSettings = confirm(
+          '🔔 Notificaciones desactivadas\n\n' +
+          'Android ya no puede mostrar el diálogo porque las denegaste antes.\n\n' +
+          'Para activarlas:\n' +
+          '1. Ve a Ajustes del celular\n' +
+          '2. Aplicaciones → Moto Móvil Pasajero\n' +
+          '3. Notificaciones → Permitir\n\n' +
+          '¿Quieres que intente abrir los ajustes ahora?'
+        );
+        if (shouldOpenSettings) {
+          try {
+            // Intento abrir ajustes de la app vía intent scheme (Android)
+            window.location.href = `intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;` +
+              `S.package=${ANDROID_PACKAGE_NAME};end`;
+          } catch (e) {
+            alert(
+              '📱 Abre manualmente:\n\n' +
+              'Ajustes → Aplicaciones → Moto Móvil Pasajero → Notificaciones'
+            );
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error toggling notificaciones:', e);
+      setStatusNotification('❌ Error al gestionar permisos');
+      setTimeout(() => setStatusNotification(null), 2500);
+    }
   }, []);
 
   const savePendingPushToken = useCallback(async (passengerId: string) => {
@@ -153,10 +279,16 @@ export default function App() {
     try {
       const client = getSupabase();
       if (client) {
-        const { error } = await client.rpc('save_passenger_fcm_token', { p_passenger_id: passengerId, p_fcm_token: pendingToken });
-        if (!error) localStorage.removeItem('motocampeon_passenger_fcm_token');
+        const { error } = await client.rpc('save_passenger_fcm_token', {
+          p_passenger_id: passengerId,
+          p_fcm_token: pendingToken
+        });
+        if (!error) {
+          console.log('✅ Token pendiente guardado');
+          localStorage.removeItem('motocampeon_passenger_fcm_token');
+        }
       }
-    } catch (e) { console.warn(e); }
+    } catch (e) { console.warn('Error guardando token pendiente:', e); }
   }, []);
 
   const applyOriginLocation = useCallback(async (coords: LatLng, fly = true) => {
@@ -182,13 +314,14 @@ export default function App() {
 
     setIsSupabaseConnected(isSupabaseConfigured());
 
+    // 👻 Auto-crear cuenta fantasma
     if (!activePassenger && !ghostCreationStartedRef.current && isSupabaseConfigured()) {
       ghostCreationStartedRef.current = true;
       createGhostPassengerIfNeeded().then(p => {
         if (p) {
           setCurrentPassenger(p);
           savePendingPushToken(p.id);
-          setTimeout(() => { pushSetupDoneRef.current = false; setupPushNotificationsForPassenger(); }, 300);
+          setTimeout(() => { setupPushNotificationsForPassenger(); }, 300);
         } else setTimeout(() => setupPushNotificationsForPassenger(), 500);
       });
     } else if (activePassenger) {
@@ -211,7 +344,7 @@ export default function App() {
         hasCenteredInitialRef.current = true;
         setFlyToTarget(safeCoords);
         await applyOriginLocation(safeCoords, true);
-        setStatusNotification(method === 'gps' ? '📍 GPS detectado' : '📍 Ubicación detectada');
+        setStatusNotification(method === 'gps' ? '📍 Ubicación GPS detectada' : '📍 Ubicación detectada');
         setTimeout(() => setStatusNotification(null), 4500);
       }
     };
@@ -319,14 +452,10 @@ export default function App() {
     const safeCenter: LatLng = { lat, lng };
     const geo = await reverseGeocode(safeCenter.lat, safeCenter.lng);
     if (isSelectingPickup) {
-      setOrigin(safeCenter);
-      setOriginAddress(geo.address);
-      setIsSelectingPickup(false);
+      setOrigin(safeCenter); setOriginAddress(geo.address); setIsSelectingPickup(false);
       if (!destination) setTimeout(() => setIsSearchOpen(true), 300);
     } else if (isSelectingDestination) {
-      setDestination(safeCenter);
-      setDestinationAddress(geo.address);
-      setIsSelectingDestination(false);
+      setDestination(safeCenter); setDestinationAddress(geo.address); setIsSelectingDestination(false);
     }
   };
 
@@ -401,11 +530,12 @@ export default function App() {
   const handleClearDestination = () => {
     setDestination(null); setDestinationAddress('');
     setRouteCoords([]); setDistanceKm(0); setDurationMins(0);
+    setStatusNotification('Ruta cancelada');
+    setTimeout(() => setStatusNotification(null), 2000);
   };
 
   const handleCenterOnlineDrivers = () => {
-    // Delegado al mapa vía ref interno; se puede disparar un evento global o pasar callback
-    // Por ahora, el botón "Ver en mapa" del panel es un placeholder visual
+    // Placeholder — el botón "Ver en mapa" del panel
   };
 
   const handleRequestRide = async (rideType: 'moto' | 'express' = 'moto', customPrice?: number) => {
@@ -443,7 +573,7 @@ export default function App() {
     };
 
     setViewedDrivers([]);
-    setPanelExpanded(false); // Colapsar el panel
+    setPanelExpanded(false);
 
     if (isSupabaseConfigured()) {
       const { ride: dbRide, error } = await createRideInSupabase({
@@ -558,7 +688,6 @@ export default function App() {
     setHasCargo(ride.hasCargo); setFlyToTarget(ride.origin);
   };
 
-  // Detectar si hay viaje activo
   const hasActiveTrip = Boolean(activeRide && (rideStatus !== 'draft'));
 
   return (
@@ -568,6 +697,7 @@ export default function App() {
         userLocation={userLocation}
         isSupabaseConnected={isSupabaseConnected}
         currentPassenger={currentPassenger}
+        notificationsEnabled={notificationsEnabled}
         onSelectCategory={setSelectedCategory}
         onOpenAnalysis={() => setIsAnalysisOpen(true)}
         onOpenHistory={() => setIsHistoryOpen(true)}
@@ -575,6 +705,7 @@ export default function App() {
         onOpenCityPicker={() => setIsCityPickerOpen(true)}
         onOpenSupabase={() => setIsSupabaseModalOpen(true)}
         onOpenPassengerModal={() => setIsPassengerModalOpen(true)}
+        onToggleNotifications={handleToggleNotifications}
       />
 
       {statusNotification && (
@@ -615,7 +746,6 @@ export default function App() {
         onLocateUser={handleLocateUser}
       />
 
-      {/* Panel unificado según estado */}
       {!hasActiveTrip && !isSelectingPickup && !isSelectingDestination && (
         <BottomSheet
           originAddress={originAddress}
@@ -727,7 +857,7 @@ export default function App() {
           setCurrentPassenger(p);
           if (p) {
             savePendingPushToken(p.id);
-            setTimeout(() => { pushSetupDoneRef.current = false; setupPushNotificationsForPassenger(); }, 500);
+            setTimeout(() => { setupPushNotificationsForPassenger(); }, 500);
           }
         }}
         onRepeatRide={handleRepeatRide}
