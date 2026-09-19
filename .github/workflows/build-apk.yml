@@ -44,8 +44,7 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: 📱 Añadir plataforma Android
-        run: |
-          npx cap add android
+        run: npx cap add android
 
       - name: 🔥 Inyectar google-services.json
         run: |
@@ -53,6 +52,52 @@ jobs:
           echo '${{ secrets.GOOGLE_SERVICES_JSON_PASAJERO }}' > android/app/google-services.json
           echo "google-services.json inyectado:"
           head -c 200 android/app/google-services.json
+
+      - name: 🔍 Verificar assets
+        run: |
+          echo "=== Contenido de assets/ ==="
+          ls -la assets/ || echo "No existe carpeta assets/"
+          echo "=== Verificando archivos ==="
+          for f in icon-only.png icon-foreground.png icon-background.png ic_stat_ride.png ic_notif_large.png; do
+            if [ -f "assets/$f" ]; then
+              echo "OK: assets/$f ($(du -h assets/$f | cut -f1))"
+            else
+              echo "FALTA: assets/$f"
+            fi
+          done
+
+      - name: 🎨 Generar iconos con @capacitor/assets
+        run: |
+          npx --yes @capacitor/assets generate \
+            --android \
+            --iconBackgroundColor '#FFFFFF' \
+            --iconBackgroundColorDark '#0a0a0b' \
+            --splashBackgroundColor '#0a0a0b' \
+            --splashBackgroundColorDark '#0a0a0b' || echo "Aviso: error en generacion, continuando..."
+
+      - name: 🖼️ Instalar ImageMagick
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+
+      - name: 🔔 Copiar iconos de notificación
+        run: |
+          RES=android/app/src/main/res
+          mkdir -p $RES/drawable-mdpi $RES/drawable-hdpi $RES/drawable-xhdpi $RES/drawable-xxhdpi $RES/drawable-xxxhdpi
+          if [ -f "assets/ic_stat_ride.png" ]; then
+            convert assets/ic_stat_ride.png -resize 24x24  $RES/drawable-mdpi/ic_stat_ride.png
+            convert assets/ic_stat_ride.png -resize 36x36  $RES/drawable-hdpi/ic_stat_ride.png
+            convert assets/ic_stat_ride.png -resize 48x48  $RES/drawable-xhdpi/ic_stat_ride.png
+            convert assets/ic_stat_ride.png -resize 72x72  $RES/drawable-xxhdpi/ic_stat_ride.png
+            convert assets/ic_stat_ride.png -resize 96x96  $RES/drawable-xxxhdpi/ic_stat_ride.png
+            echo "OK: icono notif pequeño copiado"
+          fi
+          if [ -f "assets/ic_notif_large.png" ]; then
+            convert assets/ic_notif_large.png -resize 128x128 $RES/drawable-mdpi/ic_notif_large.png
+            convert assets/ic_notif_large.png -resize 192x192 $RES/drawable-hdpi/ic_notif_large.png
+            convert assets/ic_notif_large.png -resize 256x256 $RES/drawable-xhdpi/ic_notif_large.png
+            convert assets/ic_notif_large.png -resize 384x384 $RES/drawable-xxhdpi/ic_notif_large.png
+            convert assets/ic_notif_large.png -resize 512x512 $RES/drawable-xxxhdpi/ic_notif_large.png
+            echo "OK: icono notif grande copiado"
+          fi
 
       - name: 🔓 Añadir permisos al AndroidManifest
         run: |
