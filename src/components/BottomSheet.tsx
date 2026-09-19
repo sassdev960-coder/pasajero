@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   ArrowUpDown, Bike, Package, Camera, Check, ChevronRight, ChevronDown, ChevronUp,
-  Clock, Navigation, MapPin, X, Users, Eye, Route as RouteIcon
+  Clock, Navigation, MapPin, X, Users, Eye, Route as RouteIcon, Trash2
 } from 'lucide-react';
 import { LatLng, PricingConfig, SupabaseDriver, DriverViewInfo } from '../types';
 import { calculateRideFare } from '../services/supabaseClient';
@@ -73,7 +73,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
   const viewedCount = viewedDrivers?.length || 0;
 
   // ═══════════════════════════════════════════════════════════════
-  //  ESTADO 1: SIN RUTA (solo pedir origen/destino)
+  //  ESTADO 1: SIN RUTA
   // ═══════════════════════════════════════════════════════════════
   if (!hasBothPoints) {
     return (
@@ -88,15 +88,19 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
           </div>
 
           <div className="flex-1 flex flex-col gap-2 min-w-0">
-            <div onClick={() => onOpenSearch(true)} className="cursor-pointer group">
-              <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Punto de Partida</div>
-              <div className="text-sm font-semibold text-slate-100 truncate group-hover:text-emerald-400">
-                {originAddress || 'Definir punto de recogida...'}
+            {/* Origen */}
+            <div className="flex items-center justify-between group">
+              <div onClick={() => onOpenSearch(true)} className="cursor-pointer flex-1 min-w-0">
+                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Punto de Partida</div>
+                <div className="text-sm font-semibold text-slate-100 truncate group-hover:text-emerald-400">
+                  {originAddress || 'Definir punto de recogida...'}
+                </div>
               </div>
             </div>
 
             <div className="border-t border-slate-800/80" />
 
+            {/* Destino */}
             <div className="flex items-center justify-between group gap-2 pr-1">
               <div onClick={() => onOpenSearch(false)} className="cursor-pointer min-w-0 flex-1">
                 <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Destino</div>
@@ -158,7 +162,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
           <ChevronUp className="w-4 h-4 text-slate-400" />
         </button>
 
-        {/* Contenido principal */}
+        {/* Contenido principal con botón X para cancelar */}
         <div className="p-3.5 flex items-center gap-3">
           {/* Ruta visual mini */}
           <div className="flex flex-col items-center gap-0.5 shrink-0">
@@ -176,6 +180,15 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
               {destinationAddress || 'Destino'}
             </div>
           </div>
+
+          {/* 🔴 BOTÓN X PARA CANCELAR RUTA */}
+          <button
+            onClick={onClearDestination}
+            className="w-9 h-9 rounded-full bg-rose-500/15 hover:bg-rose-500/30 text-rose-400 hover:text-rose-300 border border-rose-500/30 flex items-center justify-center transition active:scale-90 shrink-0"
+            title="Cancelar ruta y elegir otro destino"
+          >
+            <X className="w-4 h-4" />
+          </button>
 
           {/* Stats */}
           <div className="flex flex-col items-end gap-1 shrink-0 pl-3 border-l border-slate-800">
@@ -218,7 +231,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  ESTADO 3: EXPANDIDO (pantalla completa)
+  //  ESTADO 3: EXPANDIDO
   // ═══════════════════════════════════════════════════════════════
   return (
     <div className="absolute inset-0 z-40 flex flex-col bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -237,7 +250,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
 
         {/* Contenido scrolleable */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Bloque: Origen y Destino */}
+          {/* Bloque: Origen y Destino con botón X */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
             <div className="flex gap-3">
               <div className="flex flex-col items-center pt-1">
@@ -255,12 +268,29 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
                   <div className="text-sm font-semibold text-white leading-snug">{destinationAddress || 'Destino'}</div>
                 </div>
               </div>
-              <button
-                onClick={onSwapLocations}
-                className="self-center w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center border border-slate-700 shrink-0"
-              >
-                <ArrowUpDown className="w-4 h-4" />
-              </button>
+
+              {/* Botones de acción: swap + X */}
+              <div className="flex flex-col gap-2 self-center shrink-0">
+                <button
+                  onClick={onSwapLocations}
+                  className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center border border-slate-700 transition"
+                  title="Invertir origen y destino"
+                >
+                  <ArrowUpDown className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={onClearDestination}
+                  className="w-9 h-9 rounded-full bg-rose-500/15 hover:bg-rose-500/30 text-rose-400 hover:text-rose-300 flex items-center justify-center border border-rose-500/30 transition active:scale-90"
+                  title="Cancelar ruta y elegir otro destino"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Texto de ayuda para el botón X */}
+            <div className="mt-3 pt-3 border-t border-slate-800/80 text-[10px] text-slate-500 text-center">
+              Toca <span className="text-rose-400 font-bold">✕</span> para cancelar la ruta actual y elegir otra
             </div>
           </div>
 
@@ -429,10 +459,12 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
         {/* Botones inferiores fijos */}
         <div className="p-4 border-t border-slate-800 bg-slate-900/60 flex gap-3">
           <button
-            onClick={() => onToggleExpanded(false)}
-            className="px-5 py-3 rounded-2xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-sm border border-slate-700"
+            onClick={onClearDestination}
+            className="px-4 py-3 rounded-2xl bg-rose-500/15 hover:bg-rose-500/30 text-rose-400 hover:text-rose-300 font-bold text-sm border border-rose-500/30 flex items-center justify-center gap-1.5 transition"
+            title="Cancelar ruta"
           >
-            Cerrar
+            <Trash2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Cancelar ruta</span>
           </button>
           <button
             onClick={() => onRequestRide('moto', motoPrice)}
