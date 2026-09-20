@@ -33,6 +33,7 @@ import {
   uploadCargoPhoto,
   findClosestOnlineDriver,
   getSupabase,
+  saveRideRoute,
   createGhostPassengerIfNeeded
 } from './services/supabaseClient';
 
@@ -587,12 +588,23 @@ export default function App() {
         targetDriverId
       });
 
-      if (dbRide) {
+         if (dbRide) {
         newRide.id = dbRide.id;
         setStatusNotification('✅ Solicitud enviada');
         setTimeout(() => setStatusNotification(null), 2500);
-        if (rideSubRef.current) rideSubRef.current();
 
+        // 🗺️ GUARDAR LA RUTA CALCULADA para que el conductor la use igual
+        if (routeCoords.length >= 2) {
+          saveRideRoute(
+            dbRide.id,
+            routeCoords,
+            distanceKm,
+            durationMins,
+            routeSummary
+          ).catch(err => console.warn('Error guardando ruta:', err));
+        }
+
+        if (rideSubRef.current) rideSubRef.current();
         const unsub = subscribeToRideChanges(dbRide.id, (updatedRide, driverInfo, newViewedDrivers) => {
           if (newViewedDrivers) setViewedDrivers(newViewedDrivers);
           if (updatedRide.status === 'aceptado') {
