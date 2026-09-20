@@ -85,7 +85,6 @@ export default function App() {
   const [onlineDrivers, setOnlineDrivers] = useState<SupabaseDriver[]>([]);
   const [viewedDrivers, setViewedDrivers] = useState<DriverViewInfo[]>([]);
 
-  // 🔔 Estado de notificaciones
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
 
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
@@ -142,7 +141,6 @@ export default function App() {
       console.warn('⚠️ Error creando canal push:', e);
     }
 
-    // Verificar estado actual sin forzar diálogo
     await checkNotificationPermission();
 
     if (pushSetupDoneRef.current) {
@@ -151,7 +149,6 @@ export default function App() {
     }
     pushSetupDoneRef.current = true;
 
-    // Pedir permiso
     try {
       const checkResult = await PushNotifications.checkPermissions();
       let perm = checkResult;
@@ -207,9 +204,6 @@ export default function App() {
     });
   }, [checkNotificationPermission]);
 
-  // ═══════════════════════════════════════════════════════════════
-  //  🔔 TOGGLE / REACTIVAR PERMISOS DE NOTIFICACIÓN
-  // ═══════════════════════════════════════════════════════════════
   const handleToggleNotifications = useCallback(async () => {
     if (!Capacitor.isNativePlatform()) {
       setStatusNotification('Solo disponible en la app');
@@ -218,11 +212,9 @@ export default function App() {
     }
 
     try {
-      // 1. Verificar estado actual
       const current = await PushNotifications.checkPermissions();
       console.log('📋 Estado actual:', current.receive);
 
-      // 2. Si ya está concedido → toast informativo
       if (current.receive === 'granted') {
         setStatusNotification('✅ Notificaciones ya activadas');
         setTimeout(() => setStatusNotification(null), 2500);
@@ -230,7 +222,6 @@ export default function App() {
         return;
       }
 
-      // 3. Si está denegado → intentar pedir de nuevo
       console.log('🔔 Re-solicitando permiso...');
       const result = await PushNotifications.requestPermissions();
       console.log('📋 Resultado:', result.receive);
@@ -239,10 +230,8 @@ export default function App() {
         setNotificationsEnabled(true);
         setStatusNotification('✅ ¡Notificaciones activadas!');
         setTimeout(() => setStatusNotification(null), 2500);
-        // Registrar de nuevo
         await PushNotifications.register();
       } else {
-        // 4. Si Android no muestra el diálogo (denegado permanente) → abrir ajustes
         setNotificationsEnabled(false);
         const shouldOpenSettings = confirm(
           '🔔 Notificaciones desactivadas\n\n' +
@@ -255,7 +244,6 @@ export default function App() {
         );
         if (shouldOpenSettings) {
           try {
-            // Intento abrir ajustes de la app vía intent scheme (Android)
             window.location.href = `intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;` +
               `S.package=${ANDROID_PACKAGE_NAME};end`;
           } catch (e) {
@@ -314,7 +302,6 @@ export default function App() {
 
     setIsSupabaseConnected(isSupabaseConfigured());
 
-    // 👻 Auto-crear cuenta fantasma
     if (!activePassenger && !ghostCreationStartedRef.current && isSupabaseConfigured()) {
       ghostCreationStartedRef.current = true;
       createGhostPassengerIfNeeded().then(p => {
@@ -445,17 +432,32 @@ export default function App() {
     }, 400);
   }, [isSelectingPickup, isSelectingDestination]);
 
+  // ═══════════════════════════════════════════════════════════════
+  //  🎯 CONFIRMAR PIN EN MAPA — con auto-open destino
+  // ═══════════════════════════════════════════════════════════════
   const handleConfirmPinLocation = async () => {
     const lat = Number(currentCenter?.lat);
     const lng = Number(currentCenter?.lng);
     if (isNaN(lat) || isNaN(lng)) return;
     const safeCenter: LatLng = { lat, lng };
     const geo = await reverseGeocode(safeCenter.lat, safeCenter.lng);
+
     if (isSelectingPickup) {
-      setOrigin(safeCenter); setOriginAddress(geo.address); setIsSelectingPickup(false);
-      if (!destination) setTimeout(() => setIsSearchOpen(true), 300);
+      setOrigin(safeCenter);
+      setOriginAddress(geo.address);
+      setIsSelectingPickup(false);
+      // 🎯 AUTO-ABRIR buscador de destino (si no hay uno ya elegido)
+      if (!destination) {
+        setTimeout(() => {
+          setIsPickingOriginInSearch(false);   // Modo DESTINO
+          setIsSearchOpen(true);
+          console.log('🎯 Auto-abriendo buscador de destino (desde pin)');
+        }, 400);
+      }
     } else if (isSelectingDestination) {
-      setDestination(safeCenter); setDestinationAddress(geo.address); setIsSelectingDestination(false);
+      setDestination(safeCenter);
+      setDestinationAddress(geo.address);
+      setIsSelectingDestination(false);
     }
   };
 
@@ -535,7 +537,7 @@ export default function App() {
   };
 
   const handleCenterOnlineDrivers = () => {
-    // Placeholder — el botón "Ver en mapa" del panel
+    // Placeholder — delegado al componente MapComponent
   };
 
   const handleRequestRide = async (rideType: 'moto' | 'express' = 'moto', customPrice?: number) => {
@@ -813,6 +815,7 @@ export default function App() {
         />
       )}
 
+      {/* 🎯 SEARCH OVERLAY — con auto-open destino al elegir origen */}
       <SearchOverlay
         isOpen={isSearchOpen}
         isPickingOrigin={isPickingOriginInSearch}
@@ -824,31 +827,81 @@ export default function App() {
           const lng = Number(loc?.lng);
           if (isNaN(lat) || isNaN(lng)) return;
           const targetCoords = { lat, lng };
+
           if (isPickingOriginInSearch) {
+            // 🟢 Era ORIGEN → guardar y auto-abrir DESTINO
             setOrigin(targetCoords);
             setOriginAddress(`${loc.name}, ${loc.address}`);
             setFlyToTarget(targetCoords);
+            addRecentSearch({ ...loc, lat, lng });
+            setIsSearchOpen(false);
+
+            // 🎯 AUTO-ABRIR buscador de destino (si no hay uno ya elegido)
+            if (!destination) {
+              setTimeout(() => {
+                setIsPickingOriginInSearch(false);   // Modo DESTINO
+                setIsSearchOpen(true);
+                console.log('🎯 Auto-abriendo buscador de destino (desde search)');
+              }, 400);
+            }
           } else {
+            // 🎯 Era DESTINO → guardar y cerrar
             setDestination(targetCoords);
             setDestinationAddress(`${loc.name}, ${loc.address}`);
             setFlyToTarget(targetCoords);
+            addRecentSearch({ ...loc, lat, lng });
+            setIsSearchOpen(false);
           }
-          addRecentSearch({ ...loc, lat, lng });
-          setIsSearchOpen(false);
         }}
         onPickOnMap={() => {
           setIsSearchOpen(false);
-          if (isPickingOriginInSearch) { setIsSelectingPickup(true); setIsSelectingDestination(false); }
-          else { setIsSelectingDestination(true); setIsSelectingPickup(false); }
+          if (isPickingOriginInSearch) {
+            // Era origen → abrir pin en mapa para origen
+            setIsSelectingPickup(true);
+            setIsSelectingDestination(false);
+          } else {
+            // Era destino → abrir pin en mapa para destino
+            setIsSelectingDestination(true);
+            setIsSelectingPickup(false);
+          }
         }}
       />
 
-      <CityPickerModal isOpen={isCityPickerOpen} onClose={() => setIsCityPickerOpen(false)} onSelectCity={handleSelectCity} currentCoords={origin} />
-      <PaymentModal isOpen={isPaymentOpen} price={activeRide?.price || 0} onConfirmPayment={handleConfirmPayment} />
-      <RatingModal isOpen={isRatingOpen} driverName={assignedDriver?.name || 'Tu conductor'} onSubmitRating={handleSubmitRating} />
-      <HistoryModal isOpen={isHistoryOpen} history={history} onClose={() => setIsHistoryOpen(false)} onRepeatRide={handleRepeatRide} onOpenPassengerModal={() => setIsPassengerModalOpen(true)} />
+      <CityPickerModal
+        isOpen={isCityPickerOpen}
+        onClose={() => setIsCityPickerOpen(false)}
+        onSelectCity={handleSelectCity}
+        currentCoords={origin}
+      />
+
+      <PaymentModal
+        isOpen={isPaymentOpen}
+        price={activeRide?.price || 0}
+        onConfirmPayment={handleConfirmPayment}
+      />
+
+      <RatingModal
+        isOpen={isRatingOpen}
+        driverName={assignedDriver?.name || 'Tu conductor'}
+        onSubmitRating={handleSubmitRating}
+      />
+
+      <HistoryModal
+        isOpen={isHistoryOpen}
+        history={history}
+        onClose={() => setIsHistoryOpen(false)}
+        onRepeatRide={handleRepeatRide}
+        onOpenPassengerModal={() => setIsPassengerModalOpen(true)}
+      />
+
       <AnalysisModal isOpen={isAnalysisOpen} onClose={() => setIsAnalysisOpen(false)} />
-      <SupabaseModal isOpen={isSupabaseModalOpen} onClose={() => setIsSupabaseModalOpen(false)} onConfigSaved={() => setIsSupabaseConnected(isSupabaseConfigured())} />
+
+      <SupabaseModal
+        isOpen={isSupabaseModalOpen}
+        onClose={() => setIsSupabaseModalOpen(false)}
+        onConfigSaved={() => setIsSupabaseConnected(isSupabaseConfigured())}
+      />
+
       <PassengerModal
         isOpen={isPassengerModalOpen}
         onClose={() => setIsPassengerModalOpen(false)}
@@ -863,6 +916,7 @@ export default function App() {
         onRepeatRide={handleRepeatRide}
         localHistory={history}
       />
+
       <DebugConsole />
     </div>
   );
