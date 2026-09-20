@@ -41,22 +41,34 @@ jobs:
 
       # ============================================================
       # 4. ANDROID SDK
+      # FIX: Ya no pedimos paquetes específicos aquí (Gradle los
+      # descargará solo). Desactivamos la aceptación automática
+      # porque la acción se queda colgada con las licencias nuevas
+      # de Google TV / Android TV.
       # ============================================================
       - name: 🤖 Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: |
-            platform-tools
-            platforms;android-34
-            build-tools;34.0.0
-          accept-android-sdk-licenses: true
+          packages: 'platform-tools'
+          accept-android-sdk-licenses: false
 
 
       # ============================================================
-      # 5. INSTALAR DEPENDENCIAS DEL PROYECTO
-      #
-      # NO usamos npm ci porque el package-lock.json que tienes
-      # actualmente no coincide con el package.json.
+      # 5. ACEPTAR TODAS LAS LICENCIAS DEL SDK
+      # FIX: Responde "y" a TODAS las licencias (incluye GoogleTV,
+      # Android TV, etc. que la acción desconoce).
+      # ============================================================
+      - name: ✅ Aceptar todas las licencias del SDK
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          echo "✅ Licencias aceptadas"
+          echo ""
+          echo "=== Paquetes instalados actualmente ==="
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --list_installed 2>/dev/null | head -20 || true
+
+
+      # ============================================================
+      # 6. INSTALAR DEPENDENCIAS DEL PROYECTO
       # ============================================================
       - name: 📦 Instalar dependencias npm
         run: |
@@ -64,9 +76,7 @@ jobs:
 
 
       # ============================================================
-      # 6. FIJAR CAPACITOR 6
-      #
-      # NO utilizar @latest.
+      # 7. FIJAR CAPACITOR 6
       # ============================================================
       - name: 📱 Instalar Capacitor 6.2.0
         run: |
@@ -80,7 +90,7 @@ jobs:
 
 
       # ============================================================
-      # 7. VERIFICAR VERSIONES
+      # 8. VERIFICAR VERSIONES
       # ============================================================
       - name: 🔎 Verificar versiones instaladas
         run: |
@@ -116,7 +126,7 @@ jobs:
 
 
       # ============================================================
-      # 8. COMPILAR VITE / REACT
+      # 9. COMPILAR VITE / REACT
       # ============================================================
       - name: 🏗️ Compilar aplicación web
         run: npm run build
@@ -126,7 +136,7 @@ jobs:
 
 
       # ============================================================
-      # 9. CREAR PROYECTO ANDROID
+      # 10. CREAR PROYECTO ANDROID
       # ============================================================
       - name: 📱 Añadir plataforma Android
         run: |
@@ -134,13 +144,13 @@ jobs:
 
 
       # ============================================================
-      # 10. CONFIGURAR ANDROID 9
+      # 11. CONFIGURAR ANDROID 9
       #
       # Android 9 = API 28
       #
       # minSdk 23     = Android 6+
       # targetSdk 28  = Android 9
-      # compileSdk 34 = Android 14 SDK
+      # compileSdk 34 = Android 14 SDK (requerido por Capacitor)
       # ============================================================
       - name: 🔧 Configurar compatibilidad Android 9
         run: |
@@ -170,7 +180,7 @@ jobs:
 
 
       # ============================================================
-      # 11. GOOGLE SERVICES / FIREBASE
+      # 12. GOOGLE SERVICES / FIREBASE
       # ============================================================
       - name: 🔥 Inyectar google-services.json
         run: |
@@ -188,7 +198,7 @@ jobs:
 
 
       # ============================================================
-      # 12. VERIFICAR ASSETS
+      # 13. VERIFICAR ASSETS
       # ============================================================
       - name: 🔍 Verificar assets
         run: |
@@ -216,7 +226,7 @@ jobs:
 
 
       # ============================================================
-      # 13. GENERAR ICONOS
+      # 14. GENERAR ICONOS
       # ============================================================
       - name: 🎨 Generar iconos Android
         run: |
@@ -230,7 +240,7 @@ jobs:
 
 
       # ============================================================
-      # 14. INSTALAR IMAGEMAGICK
+      # 15. INSTALAR IMAGEMAGICK
       # ============================================================
       - name: 🖼️ Instalar ImageMagick
         run: |
@@ -239,7 +249,7 @@ jobs:
 
 
       # ============================================================
-      # 15. ICONOS DE NOTIFICACIÓN
+      # 16. ICONOS DE NOTIFICACIÓN
       # ============================================================
       - name: 🔔 Copiar iconos de notificación
         run: |
@@ -323,7 +333,7 @@ jobs:
 
 
       # ============================================================
-      # 16. PERMISOS
+      # 17. PERMISOS
       # ============================================================
       - name: 🔐 Configurar permisos Android
         run: |
@@ -363,7 +373,22 @@ jobs:
 
 
       # ============================================================
-      # 17. SYNC CAPACITOR
+      # 18. COPIAR ASSETS WEB AL PROYECTO ANDROID
+      # FIX: Este paso faltaba. Sin él, si recompilas la web sin
+      # reconstruir Android desde cero, el APK puede quedar con
+      # assets viejos. Copia dist/ -> android/app/src/main/assets/public
+      # ============================================================
+      - name: 📋 Copiar assets web al proyecto Android
+        run: |
+          npx cap copy android
+          echo "✅ Assets web copiados al proyecto Android"
+          echo ""
+          echo "=== Contenido de assets/public ==="
+          ls -la android/app/src/main/assets/public/ 2>/dev/null | head -15 || echo "⚠️ No se encontró assets/public"
+
+
+      # ============================================================
+      # 19. SYNC CAPACITOR
       # ============================================================
       - name: 🔄 Sincronizar Capacitor
         run: |
@@ -371,7 +396,7 @@ jobs:
 
 
       # ============================================================
-      # 18. VERIFICAR CONFIGURACIÓN FINAL
+      # 20. VERIFICAR CONFIGURACIÓN FINAL
       # ============================================================
       - name: 🧪 Verificar configuración Android
         run: |
@@ -391,7 +416,7 @@ jobs:
 
 
       # ============================================================
-      # 19. COMPILAR APK
+      # 21. COMPILAR APK
       # ============================================================
       - name: 🔨 Compilar APK
         run: |
@@ -403,7 +428,7 @@ jobs:
 
 
       # ============================================================
-      # 20. VERIFICAR APK
+      # 22. VERIFICAR APK
       # ============================================================
       - name: 🔎 Verificar APK compilado
         run: |
@@ -445,7 +470,7 @@ jobs:
 
 
       # ============================================================
-      # 21. SUBIR APK
+      # 23. SUBIR APK
       # ============================================================
       - name: 📤 Subir APK
         uses: actions/upload-artifact@v4
@@ -456,7 +481,7 @@ jobs:
 
 
       # ============================================================
-      # 22. RESUMEN
+      # 24. RESUMEN
       # ============================================================
       - name: 🎉 Resumen
         run: |
