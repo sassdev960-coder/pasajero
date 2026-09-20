@@ -5,13 +5,13 @@ import { calculateRideFare } from './supabaseClient';
 //  🔑 API KEY DE GEOAPIFY
 //  Plan FREE: 3,000 requests/día
 //  Perfil 'motorcycle' respeta sentidos de circulación
-//  type='shortest' → prioriza la ruta más corta en distancia
+//  Valores válidos de "type": balanced | short | less_maneuvers
 // ═══════════════════════════════════════════════════════════════
 const GEOAPIFY_API_KEY = '9a279217b21c42ecb86c263aa94de872';
 
 /**
  * Calcula rutas con cascada de intentos:
- *  1. Geoapify con perfil MOTORCYCLE + type=shortest (ruta más corta)
+ *  1. Geoapify con perfil MOTORCYCLE + type=short (ruta más corta)
  *  2. Geoapify con perfil DRIVE (respaldo)
  *  3. OSRM con alternativas (respaldo gratis e ilimitado)
  *  4. Ruta interpolada (emergencia)
@@ -27,12 +27,12 @@ export async function calculateRoute(origin: LatLng, destination: LatLng): Promi
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  1️⃣ GEOAPIFY — Perfil MOTORCYCLE + type=shortest
+  //  1️⃣ GEOAPIFY — Perfil MOTORCYCLE + type=short
   // ═══════════════════════════════════════════════════════════════
   try {
     const geoMotoResult = await calculateRouteWithGeoapify(origin, destination, 'motorcycle');
     if (geoMotoResult && geoMotoResult.coordinates.length >= 2) {
-      console.log('✅ Ruta calculada con Geoapify (motorcycle + shortest)');
+      console.log('✅ Ruta calculada con Geoapify (motorcycle + short)');
       return geoMotoResult;
     }
   } catch (err) {
@@ -74,7 +74,7 @@ export async function calculateRoute(origin: LatLng, destination: LatLng): Promi
 
 // ═══════════════════════════════════════════════════════════════
 //  GEOAPIFY — Perfiles motorcycle / drive / scooter
-//  type='shortest' → prioriza distancia mínima (mejor para ciudades)
+//  type=short → prioriza distancia mínima (mejor para ciudades)
 // ═══════════════════════════════════════════════════════════════
 async function calculateRouteWithGeoapify(
   origin: LatLng,
@@ -88,7 +88,7 @@ async function calculateRouteWithGeoapify(
     `&mode=${mode}` +
     `&units=metric` +
     `&lang=es` +
-    `&type=shortest` +                // 🎯 RUTA MÁS CORTA (antes: balanced)
+    `&type=short` +                    // ✅ VALOR VÁLIDO (antes: shortest ❌)
     `&format=geojson` +
     `&apiKey=${GEOAPIFY_API_KEY}`;
 
@@ -189,7 +189,7 @@ async function calculateRouteWithGeoapify(
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  OSRM — Fallback
+//  OSRM — Fallback (con alternativas)
 // ═══════════════════════════════════════════════════════════════
 async function calculateRouteWithOSRM(origin: LatLng, destination: LatLng): Promise<RouteGeometry | null> {
   const coords = `${origin.lng},${origin.lat};${destination.lng},${destination.lat}`;
@@ -264,7 +264,7 @@ async function calculateRouteWithOSRM(origin: LatLng, destination: LatLng): Prom
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  Fallback final
+//  Fallback final: interpolación en línea recta
 // ═══════════════════════════════════════════════════════════════
 function generateInterpolatedRoadRoute(origin: LatLng, destination: LatLng): RouteGeometry {
   if (
