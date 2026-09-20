@@ -4,13 +4,14 @@ import { calculateRideFare } from './supabaseClient';
 // ═══════════════════════════════════════════════════════════════
 //  🔑 API KEY DE GEOAPIFY
 //  Plan FREE: 3,000 requests/día
-//  Soporta perfil 'motorcycle' que respeta sentidos de circulación
+//  Perfil 'motorcycle' respeta sentidos de circulación
+//  type='shortest' → prioriza la ruta más corta en distancia
 // ═══════════════════════════════════════════════════════════════
 const GEOAPIFY_API_KEY = '9a279217b21c42ecb86c263aa94de872';
 
 /**
  * Calcula rutas con cascada de intentos:
- *  1. Geoapify con perfil MOTORCYCLE (respeta sentidos, ideal para motos)
+ *  1. Geoapify con perfil MOTORCYCLE + type=shortest (ruta más corta)
  *  2. Geoapify con perfil DRIVE (respaldo)
  *  3. OSRM con alternativas (respaldo gratis e ilimitado)
  *  4. Ruta interpolada (emergencia)
@@ -26,12 +27,12 @@ export async function calculateRoute(origin: LatLng, destination: LatLng): Promi
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  1️⃣ GEOAPIFY — Perfil MOTORCYCLE (respeta sentidos de calles)
+  //  1️⃣ GEOAPIFY — Perfil MOTORCYCLE + type=shortest
   // ═══════════════════════════════════════════════════════════════
   try {
     const geoMotoResult = await calculateRouteWithGeoapify(origin, destination, 'motorcycle');
     if (geoMotoResult && geoMotoResult.coordinates.length >= 2) {
-      console.log('✅ Ruta calculada con Geoapify (motorcycle)');
+      console.log('✅ Ruta calculada con Geoapify (motorcycle + shortest)');
       return geoMotoResult;
     }
   } catch (err) {
@@ -73,13 +74,13 @@ export async function calculateRoute(origin: LatLng, destination: LatLng): Promi
 
 // ═══════════════════════════════════════════════════════════════
 //  GEOAPIFY — Perfiles motorcycle / drive / scooter
+//  type='shortest' → prioriza distancia mínima (mejor para ciudades)
 // ═══════════════════════════════════════════════════════════════
 async function calculateRouteWithGeoapify(
   origin: LatLng,
   destination: LatLng,
   mode: 'motorcycle' | 'drive' | 'scooter' = 'motorcycle'
 ): Promise<RouteGeometry | null> {
-  // Geoapify usa formato: waypoints=lat,lng|lat,lng
   const waypoints = `${origin.lat},${origin.lng}|${destination.lat},${destination.lng}`;
 
   const url = `https://api.geoapify.com/v1/routing?` +
@@ -87,7 +88,7 @@ async function calculateRouteWithGeoapify(
     `&mode=${mode}` +
     `&units=metric` +
     `&lang=es` +
-    `&type=balanced` +
+    `&type=shortest` +                // 🎯 RUTA MÁS CORTA (antes: balanced)
     `&format=geojson` +
     `&apiKey=${GEOAPIFY_API_KEY}`;
 
@@ -115,7 +116,6 @@ async function calculateRouteWithGeoapify(
     const props = feature.properties || {};
     const geometry = feature.geometry;
 
-    // Geoapify devuelve distance en metros y time en segundos
     const distanceMeters = Number(props.distance) || 0;
     const durationSeconds = Number(props.time) || 0;
 
@@ -132,7 +132,6 @@ async function calculateRouteWithGeoapify(
         .filter((c: any) => Array.isArray(c) && c.length >= 2 && !isNaN(c[0]) && !isNaN(c[1]))
         .map((c: [number, number]) => [c[1], c[0]]);
     } else if (geometry.type === 'MultiLineString') {
-      // Aplanar todos los segmentos en una sola línea
       (geometry.coordinates || []).forEach((segment: any) => {
         if (Array.isArray(segment)) {
           segment.forEach((c: any) => {
@@ -153,11 +152,11 @@ async function calculateRouteWithGeoapify(
       props.legs.forEach((leg: any) => {
         if (leg.steps && Array.isArray(leg.steps)) {
           leg.steps.forEach((step: any) => {
-            const instructionText = 
-              step.instruction?.text || 
-              step.name || 
+            const instructionText =
+              step.instruction?.text ||
+              step.name ||
               'Continuar';
-            
+
             steps.push({
               instruction: instructionText,
               distanceMeters: Math.round(Number(step.distance) || 0),
@@ -168,7 +167,6 @@ async function calculateRouteWithGeoapify(
       });
     }
 
-    // Si no hay steps, generar uno simple
     if (steps.length === 0) {
       steps.push({
         instruction: 'Continúa por la ruta indicada',
@@ -181,7 +179,7 @@ async function calculateRouteWithGeoapify(
       coordinates: rawCoords,
       distanceKm,
       durationMinutes,
-      summary: `Ruta moto más rápida (${mode === 'motorcycle' ? 'moto' : 'auto'})`,
+      summary: `Ruta moto más corta (${distanceKm} km)`,
       steps
     };
   } catch (err) {
