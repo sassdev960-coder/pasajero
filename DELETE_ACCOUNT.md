@@ -20,7 +20,8 @@ Puedes solicitar la eliminación de tu cuenta de dos formas:
 ### Opción 2: Por correo electrónico
 
 Envía un correo a **motomovilcampeon@gmail.com** con el asunto: 
-Solicitud de eliminación de cuenta - [Tu nombre completo] - [Tu CI]
+
+**Solicitud de eliminación de cuenta - [Tu nombre completo] - [Tu CI]**
 
 
 
