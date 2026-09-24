@@ -4,7 +4,7 @@ export interface LatLng {
 }
 
 export interface RouteGeometry {
-  coordinates: [number, number][]; // [lat, lng]
+  coordinates: [number, number][];
   distanceKm: number;
   durationMinutes: number;
   summary: string;
@@ -27,6 +27,9 @@ export interface PointOfInterest {
   icon: string;
 }
 
+// 🆕 Tipo de acompañante
+export type CompanionType = 'none' | 'baby' | 'child' | 'teen';
+
 export interface RideRequest {
   id: string;
   origin: LatLng;
@@ -40,6 +43,7 @@ export interface RideRequest {
   hasCargo: boolean;
   cargoDescription?: string;
   cargoPhotoUrl?: string;
+  companionType?: CompanionType; // 🆕
   driver?: Driver;
   createdAt: string;
 }
@@ -63,7 +67,6 @@ export interface SavedPlace {
   lng: number;
 }
 
-// Supabase Database Row Types based on User Schema
 export interface SupabaseRide {
   id: string;
   driver_id: string | null;
@@ -90,6 +93,7 @@ export interface SupabaseRide {
   has_cargo: boolean;
   cargo_description: string | null;
   cargo_photo_url: string | null;
+  companion_type?: string | null; // 🆕
   is_queued: boolean;
   queued_after_ride: string | null;
   viewed_by_drivers?: string[] | DriverViewInfo[] | null;
@@ -155,6 +159,11 @@ export interface PricingConfig {
   extra_price: number;
   cargo_extra: number;
   minimum_price: number;
+  // 🆕 Excedentes por acompañante
+  baby_extra?: number;
+  child_extra?: number;
+  teen_extra?: number;
+  cargo_price?: number;
   is_active?: boolean;
   updated_at?: string;
   created_at?: string;
