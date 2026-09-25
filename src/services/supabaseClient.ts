@@ -1,4 +1,4 @@
-// src/services/supabaseClient.ts — VERSIÓN v6 (guardar/cargar ruta)
+// src/services/supabaseClient.ts — VERSIÓN v7 (delete passenger account)
 import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { SupabaseRide, SupabaseDriver, SupabasePassenger, LatLng, PricingConfig, DriverViewInfo } from '../types';
 
@@ -266,6 +266,38 @@ export async function updatePassengerProfile(
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 🗑️ ELIMINAR CUENTA DE PASAJERO
+// ═══════════════════════════════════════════════════════════════
+export async function deletePassengerAccount(
+  passengerId: string
+): Promise<{ success: boolean; error?: string }> {
+  const client = getSupabase();
+  if (!client) return { success: false, error: 'Supabase no configurado' };
+  if (!passengerId) return { success: false, error: 'ID de pasajero inválido' };
+
+  try {
+    const { data, error } = await client.rpc('delete_passenger_account', {
+      p_passenger_id: passengerId
+    });
+
+    if (error) {
+      console.error('Error eliminando cuenta:', error.message);
+      return { success: false, error: error.message };
+    }
+
+    if ((data as any)?.success === false) {
+      return { success: false, error: (data as any)?.error || 'No se pudo eliminar la cuenta.' };
+    }
+
+    console.log('✅ Cuenta eliminada correctamente');
+    return { success: true };
+  } catch (err: any) {
+    console.error('Excepción eliminando cuenta:', err);
+    return { success: false, error: err.message || 'Error de red.' };
+  }
+}
+
 export async function getPassengerRidesHistory(passengerId: string): Promise<SupabaseRide[]> {
   const client = getSupabase();
   if (!client) return [];
@@ -370,7 +402,6 @@ export async function saveRideRoute(
   if (!client || !rideId || routeCoords.length < 2) return false;
 
   try {
-    // GeoJSON usa [lng, lat]. Nuestras coords son [lat, lng], hay que invertir.
     const geojson = {
       type: 'LineString',
       coordinates: routeCoords.map(([lat, lng]) => [lng, lat])
@@ -405,7 +436,6 @@ export async function createRideInSupabase(rideData: {
   destination: LatLng; destinationAddress: string;
   price: number; distanceKm: number; durationMins: number;
   hasCargo: boolean; cargoDescription?: string; cargoPhotoUrl?: string;
-  companionType?: string; // 🆕 'none' | 'baby' | 'child' | 'teen'
   passengerName?: string; passengerPhone?: string;
   targetDriverId?: string | null;
 }): Promise<{ ride: SupabaseRide | null; error: string | null }> {
@@ -450,26 +480,17 @@ export async function createRideInSupabase(rideData: {
 
     const createdRide = data as SupabaseRide;
 
-    // 🆕 Actualizar companion_type si se especificó
-    const updates: any = {};
-    if (rideData.targetDriverId) {
-      updates.driver_id = rideData.targetDriverId;
-    }
-    if (rideData.companionType && rideData.companionType !== 'none') {
-      updates.companion_type = rideData.companionType;
-    }
-
-    if (Object.keys(updates).length > 0 && createdRide?.id) {
-      const { error: updErr } = await client
+    if (rideData.targetDriverId && createdRide?.id) {
+      const { error: assignErr } = await client
         .from('rides')
-        .update(updates)
+        .update({ driver_id: rideData.targetDriverId })
         .eq('id', createdRide.id);
 
-      if (!updErr) {
-        Object.assign(createdRide, updates);
-        console.log('✅ [RIDE] Actualizado:', updates);
+      if (!assignErr) {
+        createdRide.driver_id = rideData.targetDriverId;
+        console.log('✅ [RIDE] Asignado automáticamente a:', rideData.targetDriverId);
       } else {
-        console.warn('⚠️ [RIDE] No se pudo actualizar:', updErr.message);
+        console.warn('⚠️ [RIDE] No se pudo asignar automáticamente:', assignErr.message);
       }
     }
 
@@ -501,7 +522,6 @@ export async function getOnlineDrivers(_refCenter?: LatLng): Promise<SupabaseDri
     const { data, error } = await client.rpc('get_online_drivers_for_passenger');
     if (error) return [];
     const drivers = (data as SupabaseDriver[]) || [];
-    // Solo log cuando hay conductores (evita spam en consola)
     if (drivers.length > 0) {
       console.log(`✅ [getOnlineDrivers] ${drivers.length} conductores en línea`);
     }
@@ -755,94 +775,43 @@ export function subscribeToPricingConfig(onUpdate: (config: PricingConfig) => vo
 }
 
 export function calculateRideFare(
-  distanceKm: number,
-  hasCargo: boolean,
-  customConfig?: PricingConfig,
-  companionType: 'none' | 'baby' | 'child' | 'teen' = 'none'
+  distanceKm: number, hasCargo: boolean, customConfig?: PricingConfig
 ): {
-  basePrice: number;
-  baseRadiusMeters: number;
-  extraDistanceMeters: number;
-  extraPrice: number;
-  distanceMeters: number;
-  extraMeters: number;
-  extraSteps: number;
-  extraCost: number;
-  companionExtra: number;
-  cargoExtra: number;
-  motoFare: number;
-  expressFare: number;
-  total: number;
-  breakdown: string;
+  basePrice: number; baseRadiusMeters: number; extraDistanceMeters: number;
+  extraPrice: number; distanceMeters: number; extraMeters: number;
+  extraSteps: number; extraCost: number; cargoExtra: number;
+  motoFare: number; expressFare: number; total: number; breakdown: string;
 } {
   const config = customConfig || getCachedPricingConfig();
-
-  // Nueva lógica según especificación del cliente
-  const baseRadius = Number(config.base_radius_meters) || 1900;
+  const baseRadius = Number(config.base_radius_meters) || 1300;
   const basePrice = Number(config.base_price) || 4.0;
-  const extraUnit = Number(config.extra_distance_meters) || 300;
+  const extraDistanceUnit = Number(config.extra_distance_meters) || 500;
   const extraPriceUnit = Number(config.extra_price) || 1.0;
-  const babyExtra = Number(config.baby_extra ?? 0);
-  const childExtra = Number(config.child_extra ?? 1);
-  const teenExtra = Number(config.teen_extra ?? 3);
-  const cargoPrice = Number(config.cargo_price ?? config.cargo_extra ?? 4.0);
+  const cargoExtraCost = hasCargo ? (Number(config.cargo_extra) || 4.0) : 0;
   const minimumPrice = Number(config.minimum_price) || 0;
 
   const distanceMeters = Math.max(0, Math.round(distanceKm * 1000));
-
-  // 1) Tarifa base por tramos
-  let baseFare = basePrice;
-  let extraMeters = 0;
-  let extraSteps = 0;
-  let extraCost = 0;
-
+  let extraMeters = 0, extraSteps = 0, extraCost = 0;
   if (distanceMeters > baseRadius) {
     extraMeters = distanceMeters - baseRadius;
-    extraSteps = Math.ceil(extraMeters / extraUnit);
+    extraSteps = Math.ceil(extraMeters / extraDistanceUnit);
     extraCost = extraSteps * extraPriceUnit;
-    baseFare = basePrice + extraCost;
   }
+  let calculatedMoto = basePrice + extraCost;
+  if (minimumPrice > 0 && calculatedMoto < minimumPrice) calculatedMoto = minimumPrice;
 
-  // 2) Excedente por acompañante
-  let companionCost = 0;
-  if (companionType === 'child') companionCost = childExtra;
-  else if (companionType === 'teen') companionCost = teenExtra;
-  else if (companionType === 'baby') companionCost = babyExtra;
+  const motoFare = Number(calculatedMoto.toFixed(1));
+  const expressFare = Number((calculatedMoto * 1.35).toFixed(1));
+  const total = Number((motoFare + cargoExtraCost).toFixed(1));
 
-  // 3) Carga
-  const cargoCost = hasCargo ? cargoPrice : 0;
-
-  // Total
-  let total = baseFare + companionCost + cargoCost;
-  if (minimumPrice > 0 && total < minimumPrice) total = minimumPrice;
-
-  const motoFare = Number(baseFare.toFixed(2));
-  const expressFare = Number((baseFare * 1.35).toFixed(2));
-  const finalTotal = Number(total.toFixed(2));
-
-  // Breakdown legible
-  let breakdown = `Base: Bs ${basePrice.toFixed(2)} (hasta ${(baseRadius / 1000).toFixed(2)} km)`;
-  if (extraSteps > 0) breakdown += ` + ${extraSteps}×Bs ${extraPriceUnit.toFixed(2)} (${extraMeters}m extra)`;
-  if (companionCost > 0) {
-    const label = companionType === 'child' ? 'niño 5-10' : companionType === 'teen' ? 'joven 11-15' : 'bebé';
-    breakdown += ` + Bs ${companionCost.toFixed(2)} (${label})`;
-  }
-  if (cargoCost > 0) breakdown += ` + Bs ${cargoCost.toFixed(2)} (carga)`;
+  let breakdown = `Base: Bs ${basePrice.toFixed(2)} (hasta ${(baseRadius / 1000).toFixed(1)} km)`;
+  if (extraSteps > 0) breakdown += ` + ${extraSteps} tramo(s) (${extraSteps * extraDistanceUnit}m = +Bs ${extraCost.toFixed(2)})`;
+  if (cargoExtraCost > 0) breakdown += ` + Carga Bs ${cargoExtraCost.toFixed(2)}`;
 
   return {
-    basePrice,
-    baseRadiusMeters: baseRadius,
-    extraDistanceMeters: extraUnit,
-    extraPrice: extraPriceUnit,
-    distanceMeters,
-    extraMeters,
-    extraSteps,
-    extraCost,
-    companionExtra: companionCost,
-    cargoExtra: cargoCost,
-    motoFare,
-    expressFare,
-    total: finalTotal,
-    breakdown
+    basePrice, baseRadiusMeters: baseRadius,
+    extraDistanceMeters: extraDistanceUnit, extraPrice: extraPriceUnit,
+    distanceMeters, extraMeters, extraSteps, extraCost,
+    cargoExtra: cargoExtraCost, motoFare, expressFare, total, breakdown
   };
 }
