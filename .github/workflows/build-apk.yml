@@ -91,14 +91,14 @@ jobs:
       # ============================================================
       # 10. CONFIGURAR SDK VERSION
       # minSdk 23     = Android 6.0+
-      # targetSdk 35  = Android 15 (requerido por Play desde Ago 2025)
+      # targetSdk 36  = Android 16 (REQUERIDO por Play desde Ago 2026)
       # compileSdk 36 = Android 16 SDK
       # ============================================================
       - name: 🔧 Configurar versiones del SDK
         run: |
           GRADLE_FILE="android/variables.gradle"
           sed -i 's/minSdkVersion = [0-9]*/minSdkVersion = 23/' "$GRADLE_FILE"
-          sed -i 's/targetSdkVersion = [0-9]*/targetSdkVersion = 35/' "$GRADLE_FILE"
+          sed -i 's/targetSdkVersion = [0-9]*/targetSdkVersion = 36/' "$GRADLE_FILE"
           sed -i 's/compileSdkVersion = [0-9]*/compileSdkVersion = 36/' "$GRADLE_FILE"
           echo "=== variables.gradle final ==="
           cat "$GRADLE_FILE"
@@ -232,9 +232,7 @@ jobs:
           echo "✅ keystore.properties creado"
 
       # ============================================================
-      # 19. REESCRIBIR build.gradle COMPLETO
-      # Esta es la forma más segura: sobreescribimos el bloque
-      # signingConfigs y buildTypes directamente.
+      # 19. REESCRIBIR build.gradle
       # ============================================================
       - name: 📝 Configurar signingConfig en build.gradle
         run: |
@@ -243,7 +241,6 @@ jobs:
           echo "=== build.gradle ANTES ==="
           cat "$GRADLE_FILE"
 
-          # Escribir un archivo Python que haga el reemplazo de forma segura
           python3 << 'PYEOF'
           import re
 
@@ -251,7 +248,6 @@ jobs:
           with open(gradle_file, "r") as f:
               content = f.read()
 
-          # 1. Insertar carga de keystore.properties ANTES de "android {"
           keystore_block = '''
           def keystorePropertiesFile = rootProject.file("keystore.properties")
           def keystoreProperties = new Properties()
@@ -262,10 +258,8 @@ jobs:
           '''
           content = re.sub(r'\nandroid\s*\{', '\n' + keystore_block + 'android {', content, count=1)
 
-          # 2. Eliminar cualquier signingConfigs previo dentro de android { }
           content = re.sub(r'signingConfigs\s*\{[^}]*\{[^}]*\}[^}]*\}', '', content, flags=re.DOTALL)
 
-          # 3. Insertar signingConfigs al inicio del bloque android { }
           signing_configs = '''
               signingConfigs {
                   release {
@@ -280,8 +274,6 @@ jobs:
           '''
           content = re.sub(r'(android\s*\{)', r'\1' + signing_configs, content, count=1)
 
-          # 4. Dentro de buildTypes -> release, añadir signingConfig
-          # Buscamos "release {" dentro de buildTypes y añadimos la línea
           content = re.sub(
               r'(buildTypes\s*\{[\s\S]*?release\s*\{)',
               r'\1\n            signingConfig signingConfigs.release',
@@ -344,16 +336,28 @@ jobs:
           retention-days: 30
 
       # ============================================================
-      # 24. RESUMEN
+      # 24. SUBIR ARCHIVO DE DESOFUSCACIÓN (mapping.txt)
+      # ============================================================
+      - name: 📤 Subir mapping.txt (desofuscación)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-movil-pasajero-mapping
+          path: android/app/build/outputs/mapping/release/mapping.txt
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ============================================================
+      # 25. RESUMEN
       # ============================================================
       - name: 🎉 Resumen
         run: |
           echo "## ✅ AAB generado correctamente" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- 📱 minSdk: API 23 (Android 6.0+)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📱 targetSdk: API 35 (Android 15)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📱 targetSdk: API 36 (Android 16)" >> $GITHUB_STEP_SUMMARY
           echo "- 🛠️ compileSdk: API 36" >> $GITHUB_STEP_SUMMARY
           echo "- ⚡ Capacitor: 6.2.0" >> $GITHUB_STEP_SUMMARY
           echo "- 🔐 Firmado con keystore de release" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📦 Descarga el AAB en **Artifacts**." >> $GITHUB_STEP_SUMMARY
+          echo "📦 Descarga el AAB y el mapping.txt en **Artifacts**." >> $GITHUB_STEP_SUMMARY
