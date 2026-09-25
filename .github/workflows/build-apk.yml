@@ -98,7 +98,7 @@ jobs:
         run: |
           GRADLE_FILE="android/app/build.gradle"
           sed -i 's/versionCode [0-9]*/versionCode 3/' "$GRADLE_FILE"
-          sed -i 's/versionName "[^"]*"/versionName "1.1.2"/' "$GRADLE_FILE"
+          sed -i 's/versionName "[^"]*"/versionName "1.2"/' "$GRADLE_FILE"
           echo "=== Versión actualizada ==="
           grep -E "versionCode|versionName" "$GRADLE_FILE"
 
