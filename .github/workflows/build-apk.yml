@@ -90,9 +90,12 @@ jobs:
 
       # ============================================================
       # 9.5. INCREMENTAR VERSION CODE
-      # IMPORTANTE: Cada vez que subas un AAB a Play Store, este
-      # número debe ser MAYOR que el anterior. Si ya subiste el 1,
-      # ahora pon 2. Si ya subiste el 2, pon 3, y así sucesivamente.
+      # ⚠️ IMPORTANTE: Cada vez que subas un AAB a Google Play,
+      # este número DEBE ser MAYOR que el anterior.
+      # Historial:
+      #   v1  → versionCode 1 / versionName 1.0 (primera subida)
+      #   v2  → versionCode 2 / versionName 1.1 (API 36)
+      #   v3  → versionCode 3 / versionName 1.2 (política + eliminar cuenta) ← ACTUAL
       # ============================================================
       - name: 🔢 Incrementar versionCode y versionName
         run: |
@@ -105,7 +108,7 @@ jobs:
       # ============================================================
       # 10. CONFIGURAR SDK VERSION
       # minSdk 23     = Android 6.0+
-      # targetSdk 36  = Android 16 (REQUERIDO por Play desde Ago 2026)
+      # targetSdk 36  = Android 16 (REQUERIDO por Play)
       # compileSdk 36 = Android 16 SDK
       # ============================================================
       - name: 🔧 Configurar versiones del SDK
@@ -315,6 +318,9 @@ jobs:
           echo ""
           echo "=== signingConfigs en build.gradle ==="
           grep -A 10 "signingConfigs" android/app/build.gradle || true
+          echo ""
+          echo "=== versionCode / versionName ==="
+          grep -E "versionCode|versionName" android/app/build.gradle || true
 
       # ============================================================
       # 21. COMPILAR AAB
@@ -350,7 +356,7 @@ jobs:
           retention-days: 30
 
       # ============================================================
-      # 24. SUBIR ARCHIVO DE DESOFUSCACIÓN (mapping.txt)
+      # 24. SUBIR MAPPING.TXT (desofuscación)
       # ============================================================
       - name: 📤 Subir mapping.txt (desofuscación)
         if: always()
@@ -368,11 +374,20 @@ jobs:
         run: |
           echo "## ✅ AAB generado correctamente" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Configuración de esta versión" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔢 versionCode: **3**" >> $GITHUB_STEP_SUMMARY
+          echo "- 🏷️ versionName: **1.2**" >> $GITHUB_STEP_SUMMARY
           echo "- 📱 minSdk: API 23 (Android 6.0+)" >> $GITHUB_STEP_SUMMARY
           echo "- 📱 targetSdk: API 36 (Android 16)" >> $GITHUB_STEP_SUMMARY
           echo "- 🛠️ compileSdk: API 36" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔢 versionCode: 2 / versionName: 1.1" >> $GITHUB_STEP_SUMMARY
           echo "- ⚡ Capacitor: 6.2.0" >> $GITHUB_STEP_SUMMARY
           echo "- 🔐 Firmado con keystore de release" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📦 Descarga el AAB y el mapping.txt en **Artifacts**." >> $GITHUB_STEP_SUMMARY
+          echo "### Novedades de esta versión" >> $GITHUB_STEP_SUMMARY
+          echo "- 📜 Modal de aceptación de política de privacidad" >> $GITHUB_STEP_SUMMARY
+          echo "- 🗑️ Opción de eliminar cuenta desde el perfil" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔗 Enlaces a política de privacidad y eliminación de datos" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Descargas" >> $GITHUB_STEP_SUMMARY
+          echo "- **moto-movil-pasajero-aab** → subir a Play Store" >> $GITHUB_STEP_SUMMARY
+          echo "- **moto-movil-pasajero-mapping** → subir como desofuscación" >> $GITHUB_STEP_SUMMARY
