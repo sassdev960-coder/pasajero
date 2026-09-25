@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
-import { LatLng, PointOfInterest, RideRequest, Driver, PricingConfig, SupabaseDriver, SupabasePassenger, DriverViewInfo, CompanionType } from './types';
+import { LatLng, PointOfInterest, RideRequest, Driver, PricingConfig, SupabaseDriver, SupabasePassenger, DriverViewInfo } from './types';
 import { calculateRoute, calculateFare } from './services/routingService';
 import { reverseGeocode, detectUserLocationViaIP } from './services/geocodingService';
 import { POPULAR_LANDMARKS } from './data/landmarks';
@@ -19,6 +19,7 @@ import { CityPickerModal, CityOption } from './components/CityPickerModal';
 import { SupabaseModal } from './components/SupabaseModal';
 import { PassengerModal } from './components/PassengerModal';
 import { DebugConsole } from './components/DebugConsole';
+import { PolicyModal } from './components/PolicyModal';
 import { 
   isSupabaseConfigured, 
   createRideInSupabase, 
@@ -71,8 +72,6 @@ export default function App() {
   const [cargoDescription, setCargoDescription] = useState('');
   const [cargoPhotoUrl, setCargoPhotoUrl] = useState<string | null>(null);
   const [cargoPhotoFile, setCargoPhotoFile] = useState<File | null>(null);
-  // 🆕 Tipo de acompañante
-  const [companionType, setCompanionType] = useState<CompanionType>('none');
 
   const [activeRide, setActiveRide] = useState<RideRequest | null>(null);
   const [isSubmittingRide, setIsSubmittingRide] = useState(false);
@@ -84,6 +83,17 @@ export default function App() {
   const [driverDistanceMeters, setDriverDistanceMeters] = useState<number>(0);
 
   const [panelExpanded, setPanelExpanded] = useState(false);
+
+  // ═══════════════════════════════════════════════════════════════
+  //  POLÍTICA DE PRIVACIDAD — Aceptación obligatoria
+  // ═══════════════════════════════════════════════════════════════
+  const [policyAccepted, setPolicyAccepted] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('motocampeon_policy_accepted') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   const [onlineDrivers, setOnlineDrivers] = useState<SupabaseDriver[]>([]);
   const [viewedDrivers, setViewedDrivers] = useState<DriverViewInfo[]>([]);
@@ -435,6 +445,9 @@ export default function App() {
     }, 400);
   }, [isSelectingPickup, isSelectingDestination]);
 
+  // ═══════════════════════════════════════════════════════════════
+  //  🎯 CONFIRMAR PIN EN MAPA — con auto-open destino
+  // ═══════════════════════════════════════════════════════════════
   const handleConfirmPinLocation = async () => {
     const lat = Number(currentCenter?.lat);
     const lng = Number(currentCenter?.lng);
@@ -446,9 +459,10 @@ export default function App() {
       setOrigin(safeCenter);
       setOriginAddress(geo.address);
       setIsSelectingPickup(false);
+      // 🎯 AUTO-ABRIR buscador de destino (si no hay uno ya elegido)
       if (!destination) {
         setTimeout(() => {
-          setIsPickingOriginInSearch(false);
+          setIsPickingOriginInSearch(false);   // Modo DESTINO
           setIsSearchOpen(true);
           console.log('🎯 Auto-abriendo buscador de destino (desde pin)');
         }, 400);
@@ -536,14 +550,14 @@ export default function App() {
   };
 
   const handleCenterOnlineDrivers = () => {
-    // Placeholder
+    // Placeholder — delegado al componente MapComponent
   };
 
   const handleRequestRide = async (rideType: 'moto' | 'express' = 'moto', customPrice?: number) => {
     if (!origin || !destination) return;
     setIsSubmittingRide(true);
-    const fare = calculateFare(distanceKm, hasCargo, pricingConfig, companionType);
-    const finalPrice = customPrice !== undefined ? customPrice : fare.total;
+    const fare = calculateFare(distanceKm, hasCargo, pricingConfig);
+    const finalPrice = customPrice !== undefined ? customPrice : fare.motoFare;
 
     let targetDriverId: string | null = null;
     if (isSupabaseConfigured()) {
@@ -570,7 +584,6 @@ export default function App() {
       status: 'solicitando', hasCargo,
       cargoDescription: hasCargo ? cargoDescription : undefined,
       cargoPhotoUrl: finalCargoPhotoUrl,
-      companionType, // 🆕
       createdAt: new Date().toISOString()
     };
 
@@ -582,7 +595,6 @@ export default function App() {
         origin, originAddress, destination, destinationAddress,
         price: finalPrice, distanceKm, durationMins,
         hasCargo, cargoDescription, cargoPhotoUrl: finalCargoPhotoUrl,
-        companionType, // 🆕
         passengerName: currentPassenger?.full_name || undefined,
         passengerPhone: currentPassenger?.phone || undefined,
         targetDriverId
@@ -593,6 +605,7 @@ export default function App() {
         setStatusNotification('✅ Solicitud enviada');
         setTimeout(() => setStatusNotification(null), 2500);
 
+        // 🗺️ GUARDAR LA RUTA CALCULADA para que el conductor la use igual
         if (routeCoords.length >= 2) {
           saveRideRoute(
             dbRide.id,
@@ -693,14 +706,12 @@ export default function App() {
     setActiveRide(null); setAssignedDriver(null); setViewedDrivers([]);
     setRideStatus('draft'); setHasCargo(false); setCargoDescription('');
     setCargoPhotoUrl(null); setCargoPhotoFile(null);
-    setCompanionType('none'); // 🆕 reset
   };
 
   const handleRepeatRide = (ride: RideRequest) => {
     setOrigin(ride.origin); setOriginAddress(ride.originAddress);
     setDestination(ride.destination); setDestinationAddress(ride.destinationAddress);
     setHasCargo(ride.hasCargo); setFlyToTarget(ride.origin);
-    setCompanionType(ride.companionType || 'none'); // 🆕
   };
 
   const hasActiveTrip = Boolean(activeRide && (rideStatus !== 'draft'));
@@ -773,8 +784,6 @@ export default function App() {
           hasCargo={hasCargo}
           cargoDescription={cargoDescription}
           cargoPhotoUrl={cargoPhotoUrl}
-          companionType={companionType}
-          onCompanionTypeChange={setCompanionType}
           isSubmitting={isSubmittingRide}
           pricingConfig={pricingConfig}
           panelExpanded={panelExpanded}
@@ -830,6 +839,7 @@ export default function App() {
         />
       )}
 
+      {/* 🎯 SEARCH OVERLAY — con auto-open destino al elegir origen */}
       <SearchOverlay
         isOpen={isSearchOpen}
         isPickingOrigin={isPickingOriginInSearch}
@@ -843,20 +853,23 @@ export default function App() {
           const targetCoords = { lat, lng };
 
           if (isPickingOriginInSearch) {
+            // 🟢 Era ORIGEN → guardar y auto-abrir DESTINO
             setOrigin(targetCoords);
             setOriginAddress(`${loc.name}, ${loc.address}`);
             setFlyToTarget(targetCoords);
             addRecentSearch({ ...loc, lat, lng });
             setIsSearchOpen(false);
 
+            // 🎯 AUTO-ABRIR buscador de destino (si no hay uno ya elegido)
             if (!destination) {
               setTimeout(() => {
-                setIsPickingOriginInSearch(false);
+                setIsPickingOriginInSearch(false);   // Modo DESTINO
                 setIsSearchOpen(true);
                 console.log('🎯 Auto-abriendo buscador de destino (desde search)');
               }, 400);
             }
           } else {
+            // 🎯 Era DESTINO → guardar y cerrar
             setDestination(targetCoords);
             setDestinationAddress(`${loc.name}, ${loc.address}`);
             setFlyToTarget(targetCoords);
@@ -867,9 +880,11 @@ export default function App() {
         onPickOnMap={() => {
           setIsSearchOpen(false);
           if (isPickingOriginInSearch) {
+            // Era origen → abrir pin en mapa para origen
             setIsSelectingPickup(true);
             setIsSelectingDestination(false);
           } else {
+            // Era destino → abrir pin en mapa para destino
             setIsSelectingDestination(true);
             setIsSelectingPickup(false);
           }
@@ -924,6 +939,22 @@ export default function App() {
         }}
         onRepeatRide={handleRepeatRide}
         localHistory={history}
+      />
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* MODAL DE ACEPTACIÓN DE POLÍTICA DE PRIVACIDAD              */}
+      {/* Bloquea la app hasta que el usuario acepte la política.    */}
+      {/* Aparece solo la primera vez que se abre la app.            */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <PolicyModal
+        isOpen={!policyAccepted}
+        onAccept={() => {
+          try {
+            localStorage.setItem('motocampeon_policy_accepted', 'true');
+            localStorage.setItem('motocampeon_policy_accepted_at', new Date().toISOString());
+          } catch {}
+          setPolicyAccepted(true);
+        }}
       />
 
       <DebugConsole />
