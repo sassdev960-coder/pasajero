@@ -15,7 +15,9 @@ import {
   Sparkles,
   ArrowRight,
   Loader2,
-  Ghost
+  Ghost,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import { SupabasePassenger, SupabaseRide, RideRequest } from '../types';
 import { 
@@ -25,7 +27,8 @@ import {
   registerPassenger, 
   updatePassengerProfile, 
   getPassengerRidesHistory, 
-  getPassengerStats 
+  getPassengerStats,
+  deletePassengerAccount
 } from '../services/supabaseClient';
 
 interface PassengerModalProps {
@@ -67,6 +70,10 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
 
   // Detectar si es cuenta fantasma
   const isGhostAccount = Boolean(currentPassenger?.ci?.startsWith('dev-'));
+
+  // Estados para eliminación de cuenta
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -175,10 +182,8 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
     setSuccessMessage(null);
     setIsLoading(true);
 
-    // Al personalizar una cuenta fantasma, mantener su CI internamente
-    // pero permitir vacío en el campo visual
     const finalCi = isGhostAccount && !ci.trim() 
-      ? currentPassenger.ci  // mantener el device_id
+      ? currentPassenger.ci
       : ci;
 
     const result = await updatePassengerProfile(currentPassenger.id, fullName, phone, finalCi);
@@ -202,6 +207,40 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
     setErrorMessage(null);
     setSuccessMessage('Has cerrado sesión.');
     setTimeout(() => setSuccessMessage(null), 2500);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!currentPassenger) return;
+    setIsDeleting(true);
+    setErrorMessage(null);
+
+    try {
+      const result = await deletePassengerAccount(currentPassenger.id);
+      if (!result.success) {
+        setErrorMessage(result.error || 'No se pudo eliminar la cuenta. Intenta de nuevo.');
+        setIsDeleting(false);
+        return;
+      }
+
+      setCurrentPassenger(null);
+      onPassengerChanged(null);
+      try {
+        localStorage.removeItem('motocampeon_history');
+        localStorage.removeItem('motocampeon_passenger_session');
+        localStorage.removeItem('motocampeon_policy_accepted');
+      } catch {}
+
+      setShowDeleteConfirm(false);
+      setSuccessMessage('Tu cuenta y tus datos han sido eliminados correctamente.');
+      setTimeout(() => {
+        setSuccessMessage(null);
+        onClose();
+      }, 2500);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Error al eliminar la cuenta.');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -629,6 +668,21 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
                       </>
                     )}
                   </button>
+
+                  {/* ZONA PELIGROSA — Eliminar cuenta */}
+                  <div className="pt-3 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteConfirm(true)}
+                      className="w-full py-2.5 px-4 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 font-bold text-xs transition flex items-center justify-center gap-2"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Eliminar mi cuenta y todos mis datos
+                    </button>
+                    <p className="text-[10px] text-slate-500 text-center mt-2 leading-relaxed">
+                      Esta acción es permanente y no se puede deshacer.
+                    </p>
+                  </div>
                 </form>
               )}
 
@@ -791,6 +845,62 @@ export const PassengerModal: React.FC<PassengerModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Modal de confirmación de eliminación */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-red-500/40 rounded-3xl w-full max-w-sm shadow-2xl p-5 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center border border-red-500/40 shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-white">¿Eliminar tu cuenta?</h3>
+                <p className="text-[11px] text-slate-400">
+                  Esta acción no se puede deshacer.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-3 text-[11px] text-red-200 leading-relaxed">
+              Se eliminarán <strong>permanentemente</strong>:
+              <ul className="mt-1.5 space-y-0.5 list-disc list-inside">
+                <li>Tu nombre, teléfono y CI</li>
+                <li>Tu foto de perfil</li>
+                <li>Tu historial de viajes</li>
+                <li>Tu token de notificaciones</li>
+              </ul>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={isDeleting}
+                className="flex-1 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Eliminando...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Sí, eliminar
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
