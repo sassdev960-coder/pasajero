@@ -446,7 +446,9 @@ export default function App() {
   }, [isSelectingPickup, isSelectingDestination]);
 
   // ═══════════════════════════════════════════════════════════════
-  //  🎯 CONFIRMAR PIN EN MAPA — con auto-open destino
+  //  🎯 CONFIRMAR PIN EN MAPA
+  //  ✅ CAMBIO: Ya NO abre el buscador automáticamente.
+  //     El panel inferior sube solo y muestra "¿A dónde te llevamos?".
   // ═══════════════════════════════════════════════════════════════
   const handleConfirmPinLocation = async () => {
     const lat = Number(currentCenter?.lat);
@@ -459,14 +461,7 @@ export default function App() {
       setOrigin(safeCenter);
       setOriginAddress(geo.address);
       setIsSelectingPickup(false);
-      // 🎯 AUTO-ABRIR buscador de destino (si no hay uno ya elegido)
-      if (!destination) {
-        setTimeout(() => {
-          setIsPickingOriginInSearch(false);   // Modo DESTINO
-          setIsSearchOpen(true);
-          console.log('🎯 Auto-abriendo buscador de destino (desde pin)');
-        }, 400);
-      }
+      // ✅ No abrimos nada. El BottomSheet aparece solo.
     } else if (isSelectingDestination) {
       setDestination(safeCenter);
       setDestinationAddress(geo.address);
@@ -839,7 +834,12 @@ export default function App() {
         />
       )}
 
-      {/* 🎯 SEARCH OVERLAY — con auto-open destino al elegir origen */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* 🎯 SEARCH OVERLAY                                          */}
+      {/* ✅ CAMBIO: Al elegir ORIGEN ya NO se abre el buscador de   */}
+      {/*    destino automáticamente. El usuario decide si quiere    */}
+      {/*    buscar por texto tocando la lupa o el campo destino.    */}
+      {/* ═══════════════════════════════════════════════════════════ */}
       <SearchOverlay
         isOpen={isSearchOpen}
         isPickingOrigin={isPickingOriginInSearch}
@@ -853,23 +853,15 @@ export default function App() {
           const targetCoords = { lat, lng };
 
           if (isPickingOriginInSearch) {
-            // 🟢 Era ORIGEN → guardar y auto-abrir DESTINO
+            // 🟢 Era ORIGEN → guardar y cerrar (SIN forzar destino)
             setOrigin(targetCoords);
             setOriginAddress(`${loc.name}, ${loc.address}`);
             setFlyToTarget(targetCoords);
             addRecentSearch({ ...loc, lat, lng });
             setIsSearchOpen(false);
-
-            // 🎯 AUTO-ABRIR buscador de destino (si no hay uno ya elegido)
-            if (!destination) {
-              setTimeout(() => {
-                setIsPickingOriginInSearch(false);   // Modo DESTINO
-                setIsSearchOpen(true);
-                console.log('🎯 Auto-abriendo buscador de destino (desde search)');
-              }, 400);
-            }
+            // ✅ NO abrimos el buscador de destino. El BottomSheet aparece solo.
           } else {
-            // 🎯 Era DESTINO → guardar y cerrar
+            // 🟠 Era DESTINO → guardar y cerrar
             setDestination(targetCoords);
             setDestinationAddress(`${loc.name}, ${loc.address}`);
             setFlyToTarget(targetCoords);
@@ -880,11 +872,9 @@ export default function App() {
         onPickOnMap={() => {
           setIsSearchOpen(false);
           if (isPickingOriginInSearch) {
-            // Era origen → abrir pin en mapa para origen
             setIsSelectingPickup(true);
             setIsSelectingDestination(false);
           } else {
-            // Era destino → abrir pin en mapa para destino
             setIsSelectingDestination(true);
             setIsSelectingPickup(false);
           }
