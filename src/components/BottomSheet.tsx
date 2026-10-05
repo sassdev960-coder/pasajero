@@ -17,8 +17,9 @@ interface BottomSheetProps {
   hasCargo: boolean;
   cargoDescription: string;
   cargoPhotoUrl: string | null;
-  companionType: CompanionType;
-  onCompanionTypeChange: (type: CompanionType) => void;
+  // ✅ Ahora opcionales para no romper si App.tsx no los pasa todavía
+  companionType?: CompanionType;
+  onCompanionTypeChange?: (type: CompanionType) => void;
   isSubmitting: boolean;
   pricingConfig?: PricingConfig;
   panelExpanded: boolean;
@@ -48,7 +49,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
   hasCargo,
   cargoDescription,
   cargoPhotoUrl,
-  companionType,
+  companionType = 'none',
   onCompanionTypeChange,
   isSubmitting,
   pricingConfig,
@@ -69,11 +70,18 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
 }) => {
   const [imageError, setImageError] = useState(false);
 
-  const fareResult = calculateRideFare(distanceKm, hasCargo, pricingConfig, companionType);
-  const totalPrice = fareResult.total;
+  const fareResult = calculateRideFare(distanceKm, hasCargo, pricingConfig);
   const baseFare = fareResult.motoFare;
-  const companionExtra = fareResult.companionExtra;
   const cargoExtra = fareResult.cargoExtra;
+
+  // 🆕 Excedente por acompañante (calculado localmente)
+  const companionExtra =
+    companionType === 'baby' ? (pricingConfig?.baby_extra ?? 0)
+    : companionType === 'child' ? (pricingConfig?.child_extra ?? 1)
+    : companionType === 'teen' ? (pricingConfig?.teen_extra ?? 3)
+    : 0;
+
+  const totalPrice = Number((baseFare + cargoExtra + companionExtra).toFixed(1));
 
   const hasBothPoints = Boolean(origin && destination);
   const viewedCount = viewedDrivers?.length || 0;
@@ -86,11 +94,12 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
   ];
 
   // ═══════════════════════════════════════════════════════════════
-  //  ESTADO 1: SIN RUTA
+  //  ESTADO 1: SIN RUTA — ✅ CON ANIMACIÓN FLUIDA
   // ═══════════════════════════════════════════════════════════════
   if (!hasBothPoints) {
     return (
-      <div className="absolute bottom-0 left-0 right-0 z-20 bg-slate-950 border-t border-slate-800 rounded-t-3xl shadow-2xl p-4 flex flex-col gap-3">
+      <div className="absolute bottom-0 left-0 right-0 z-20 bg-slate-950 border-t border-slate-800 rounded-t-3xl shadow-2xl p-4 flex flex-col gap-3
+                      animate-in slide-in-from-bottom-4 fade-in duration-300 ease-out">
         <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto mb-1" />
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex items-center gap-3 relative">
@@ -129,11 +138,22 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
           </div>
         </div>
 
+        {/* ✅ CTA llamativo con gradiente */}
         <button
           onClick={() => onOpenSearch(!origin)}
-          className="w-full py-3.5 px-6 rounded-2xl bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-sm flex items-center justify-center gap-2 border border-slate-700"
+          className="w-full py-3.5 px-6 rounded-2xl
+                     bg-gradient-to-r from-amber-500 to-orange-500
+                     hover:from-amber-400 hover:to-orange-400
+                     text-slate-950 font-black text-sm
+                     flex items-center justify-center gap-2
+                     shadow-lg shadow-amber-500/25
+                     active:scale-[0.98] transition-all duration-200"
         >
-          {!origin ? 'Definir Punto de Partida' : 'Seleccionar Punto de Destino'}
+          {!origin ? (
+            <>📍 Definir Punto de Partida</>
+          ) : (
+            <>🏍️ ¿A dónde te llevamos?</>
+          )}
         </button>
       </div>
     );
@@ -316,57 +336,59 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
             </div>
           </div>
 
-          {/* 🆕 Bloque: Acompañante */}
-          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <Users className="w-4 h-4 text-amber-400" />
-              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                ¿Viajas con alguien?
-              </span>
-            </div>
+          {/* Bloque: Acompañante */}
+          {onCompanionTypeChange && (
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Users className="w-4 h-4 text-amber-400" />
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                  ¿Viajas con alguien?
+                </span>
+              </div>
 
-            <div className="space-y-2">
-              {companionOptions.map(opt => {
-                const isSelected = companionType === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => onCompanionTypeChange(opt.value)}
-                    className={`w-full p-3 rounded-xl flex items-center gap-3 border transition text-left active:scale-[0.98] ${
-                      isSelected
-                        ? 'bg-amber-500/10 border-amber-500/50 ring-1 ring-amber-500/30'
-                        : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800/70'
-                    }`}
-                  >
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                      isSelected
-                        ? 'bg-amber-500 text-slate-950'
-                        : 'bg-slate-700/60 text-slate-400'
-                    }`}>
-                      {opt.value === 'baby' ? <Baby className="w-4 h-4" /> : <UserIcon className="w-4 h-4" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-bold text-white">{opt.label}</div>
-                      <div className="text-[11px] text-slate-400 truncate">{opt.sub}</div>
-                    </div>
-                    {isSelected && (
-                      <Check className="w-4 h-4 text-amber-400 shrink-0" />
-                    )}
-                    {opt.extra > 0 && (
-                      <span className={`text-[10px] font-bold shrink-0 ${isSelected ? 'text-amber-400' : 'text-slate-500'}`}>
-                        +Bs {opt.extra.toFixed(2)}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+              <div className="space-y-2">
+                {companionOptions.map(opt => {
+                  const isSelected = companionType === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => onCompanionTypeChange(opt.value)}
+                      className={`w-full p-3 rounded-xl flex items-center gap-3 border transition text-left active:scale-[0.98] ${
+                        isSelected
+                          ? 'bg-amber-500/10 border-amber-500/50 ring-1 ring-amber-500/30'
+                          : 'bg-slate-800/40 border-slate-700/60 hover:bg-slate-800/70'
+                      }`}
+                    >
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                        isSelected
+                          ? 'bg-amber-500 text-slate-950'
+                          : 'bg-slate-700/60 text-slate-400'
+                      }`}>
+                        {opt.value === 'baby' ? <Baby className="w-4 h-4" /> : <UserIcon className="w-4 h-4" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold text-white">{opt.label}</div>
+                        <div className="text-[11px] text-slate-400 truncate">{opt.sub}</div>
+                      </div>
+                      {isSelected && (
+                        <Check className="w-4 h-4 text-amber-400 shrink-0" />
+                      )}
+                      {opt.extra > 0 && (
+                        <span className={`text-[10px] font-bold shrink-0 ${isSelected ? 'text-amber-400' : 'text-slate-500'}`}>
+                          +Bs {opt.extra.toFixed(2)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
 
-            <div className="mt-3 pt-3 border-t border-slate-800/80 text-[10px] text-slate-500 leading-relaxed">
-              ⚠️ En la moto solo puede ir 1 acompañante (bebé, niño o joven). No se permite llevar 2 adultos.
+              <div className="mt-3 pt-3 border-t border-slate-800/80 text-[10px] text-slate-500 leading-relaxed">
+                ⚠️ En la moto solo puede ir 1 acompañante (bebé, niño o joven). No se permite llevar 2 adultos.
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Bloque: Carga */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4">
