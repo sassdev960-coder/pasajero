@@ -1,4 +1,4 @@
-name: Build Passenger AAB - Google Play
+name: Build Passenger AAB + APK - Google Play
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build Passenger AAB
+    name: Build Passenger AAB + APK
     runs-on: ubuntu-latest
 
     steps:
@@ -95,13 +95,14 @@ jobs:
       # Historial:
       #   v1  → versionCode 1 / versionName 1.0 (primera subida)
       #   v2  → versionCode 2 / versionName 1.1 (API 36)
-      #   v3  → versionCode 3 / versionName 1.2 (política + eliminar cuenta) ← ACTUAL
+      #   v3  → versionCode 3 / versionName 1.2 (política + eliminar cuenta)
+      #   v4  → versionCode 4 / versionName 1.3 (UI mejorada + debug console + APK) ← ACTUAL
       # ============================================================
       - name: 🔢 Incrementar versionCode y versionName
         run: |
           GRADLE_FILE="android/app/build.gradle"
-          sed -i 's/versionCode [0-9]*/versionCode 3/' "$GRADLE_FILE"
-          sed -i 's/versionName "[^"]*"/versionName "1.2"/' "$GRADLE_FILE"
+          sed -i 's/versionCode [0-9]*/versionCode 4/' "$GRADLE_FILE"
+          sed -i 's/versionName "[^"]*"/versionName "1.3"/' "$GRADLE_FILE"
           echo "=== Versión actualizada ==="
           grep -E "versionCode|versionName" "$GRADLE_FILE"
 
@@ -323,7 +324,7 @@ jobs:
           grep -E "versionCode|versionName" android/app/build.gradle || true
 
       # ============================================================
-      # 21. COMPILAR AAB
+      # 21. COMPILAR AAB (Google Play)
       # ============================================================
       - name: 🔨 Compilar App Bundle (AAB)
         run: |
@@ -332,11 +333,23 @@ jobs:
           ./gradlew bundleRelease --no-daemon --stacktrace
 
       # ============================================================
-      # 22. VERIFICAR AAB
+      # 21.5. COMPILAR APK (pruebas rápidas en celular)
+      # Se firma con el mismo keystore de release → se instala
+      # directamente en cualquier celular sin configurar nada.
       # ============================================================
-      - name: 🔎 Verificar AAB
+      - name: 📦 Compilar APK Release (para pruebas)
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      # ============================================================
+      # 22. VERIFICAR ARTEFACTOS
+      # ============================================================
+      - name: 🔎 Verificar AAB y APK
         run: |
           AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+
           if [ ! -f "$AAB" ]; then
             echo "❌ ERROR: No se generó el AAB."
             find android/app/build/outputs -type f || true
@@ -345,14 +358,33 @@ jobs:
           echo "✅ AAB generado:"
           ls -lh "$AAB"
 
+          if [ ! -f "$APK" ]; then
+            echo "❌ ERROR: No se generó el APK."
+            find android/app/build/outputs -type f || true
+            exit 1
+          fi
+          echo ""
+          echo "✅ APK generado:"
+          ls -lh "$APK"
+
       # ============================================================
-      # 23. SUBIR AAB
+      # 23. SUBIR AAB (Google Play)
       # ============================================================
       - name: 📤 Subir AAB
         uses: actions/upload-artifact@v4
         with:
           name: moto-movil-pasajero-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 30
+
+      # ============================================================
+      # 23.5. SUBIR APK (instalación directa en celular)
+      # ============================================================
+      - name: 📤 Subir APK (para pruebas en celular)
+        uses: actions/upload-artifact@v4
+        with:
+          name: moto-movil-pasajero-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
 
       # ============================================================
@@ -372,11 +404,11 @@ jobs:
       # ============================================================
       - name: 🎉 Resumen
         run: |
-          echo "## ✅ AAB generado correctamente" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Build completado (AAB + APK)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Configuración de esta versión" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔢 versionCode: **3**" >> $GITHUB_STEP_SUMMARY
-          echo "- 🏷️ versionName: **1.2**" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔢 versionCode: **4**" >> $GITHUB_STEP_SUMMARY
+          echo "- 🏷️ versionName: **1.3**" >> $GITHUB_STEP_SUMMARY
           echo "- 📱 minSdk: API 23 (Android 6.0+)" >> $GITHUB_STEP_SUMMARY
           echo "- 📱 targetSdk: API 36 (Android 16)" >> $GITHUB_STEP_SUMMARY
           echo "- 🛠️ compileSdk: API 36" >> $GITHUB_STEP_SUMMARY
@@ -384,10 +416,22 @@ jobs:
           echo "- 🔐 Firmado con keystore de release" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Novedades de esta versión" >> $GITHUB_STEP_SUMMARY
-          echo "- 📜 Modal de aceptación de política de privacidad" >> $GITHUB_STEP_SUMMARY
-          echo "- 🗑️ Opción de eliminar cuenta desde el perfil" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔗 Enlaces a política de privacidad y eliminación de datos" >> $GITHUB_STEP_SUMMARY
+          echo "- 🐛 Botón de debug movido a esquina superior izquierda" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎯 Búsqueda de destino más simple (sin pantallas forzadas)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✨ Animación fluida al definir origen" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 Exportación adicional en APK para pruebas rápidas" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📦 Descargas" >> $GITHUB_STEP_SUMMARY
-          echo "- **moto-movil-pasajero-aab** → subir a Play Store" >> $GITHUB_STEP_SUMMARY
-          echo "- **moto-movil-pasajero-mapping** → subir como desofuscación" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifacto | Uso |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| **moto-movil-pasajero-aab** | Subir a Google Play Store |" >> $GITHUB_STEP_SUMMARY
+          echo "| **moto-movil-pasajero-apk** | Instalar directo en tu celular (pruebas) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **moto-movil-pasajero-mapping** | Subir como desofuscación en Play |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📲 Cómo instalar el APK en tu celular" >> $GITHUB_STEP_SUMMARY
+          echo "1. Descarga el artifact **moto-movil-pasajero-apk** desde esta página" >> $GITHUB_STEP_SUMMARY
+          echo "2. Descomprime el ZIP (contiene \`app-release.apk\`)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Pasa el APK al celular (cable, WhatsApp, Drive, etc.)" >> $GITHUB_STEP_SUMMARY
+          echo "4. En el celular: Ajustes → Seguridad → Permitir orígenes desconocidos" >> $GITHUB_STEP_SUMMARY
+          echo "5. Toca el APK y se instala directamente" >> $GITHUB_STEP_SUMMARY
