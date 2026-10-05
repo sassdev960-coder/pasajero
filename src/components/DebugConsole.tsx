@@ -190,25 +190,39 @@ export const DebugConsole: React.FC = () => {
   const warnCount = logs.filter(l => l.type === 'warn').length;
 
   // ═══════════════════════════════════════════════════════════════
-  // BOTÓN FLOTANTE
+  // BOTÓN FLOTANTE — ✅ MOVIDO A ESQUINA SUPERIOR IZQUIERDA
+  // No obstaculiza los controles del mapa ni el bottom sheet
   // ═══════════════════════════════════════════════════════════════
   if (!isOpen) {
     return (
       <button
         onClick={handleOpen}
-        className="fixed bottom-24 right-3 z-[9999] w-12 h-12 rounded-full bg-slate-900/95 hover:bg-slate-800 border-2 border-slate-700 shadow-2xl backdrop-blur-md flex items-center justify-center transition-all active:scale-90"
         aria-label="Abrir consola de debug"
+        className="fixed top-24 left-3 z-[9999] w-10 h-10 rounded-full
+                   bg-slate-900/60 hover:bg-slate-800/95
+                   border border-amber-500/30 hover:border-amber-500/80
+                   shadow-lg shadow-black/30 backdrop-blur-md
+                   flex items-center justify-center
+                   transition-all duration-200 active:scale-90
+                   hover:shadow-amber-500/25 hover:shadow-xl"
         style={{ touchAction: 'none' }}
       >
-        <Settings className="w-5 h-5 text-amber-400" />
+        <Settings className="w-4 h-4 text-amber-400/80" />
+
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-slate-900">
+          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1
+                           bg-red-500 text-white text-[10px] font-bold
+                           rounded-full flex items-center justify-center
+                           border-2 border-slate-900 animate-pulse">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
+
         {!isOnline && (
-          <span className="absolute -bottom-1 -left-1 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center border border-slate-900">
-            <WifiOff className="w-2.5 h-2.5 text-white" />
+          <span className="absolute -bottom-0.5 -left-0.5 w-3.5 h-3.5 bg-red-600
+                           rounded-full flex items-center justify-center
+                           border border-slate-900">
+            <WifiOff className="w-2 h-2 text-white" />
           </span>
         )}
       </button>
