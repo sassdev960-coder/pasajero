@@ -344,7 +344,7 @@ export default function App() {
         hasCenteredInitialRef.current = true;
         setFlyToTarget(safeCoords);
         await applyOriginLocation(safeCoords, true);
-        setStatusNotification(method === 'gps' ? '📍 Ubicación GPS detectada' : '📍 Ubicación detectada');
+        setStatusNotification(method === 'gps' ? 'Ubicación GPS detectada' : 'Ubicación detectada');
         setTimeout(() => setStatusNotification(null), 4500);
       }
     };
@@ -447,8 +447,7 @@ export default function App() {
 
   // ═══════════════════════════════════════════════════════════════
   //  🎯 CONFIRMAR PIN EN MAPA
-  //  ✅ CAMBIO: Ya NO abre el buscador automáticamente.
-  //     El panel inferior sube solo y muestra "¿A dónde te llevamos?".
+  //  Ya NO abre el buscador automáticamente.
   // ═══════════════════════════════════════════════════════════════
   const handleConfirmPinLocation = async () => {
     const lat = Number(currentCenter?.lat);
@@ -461,7 +460,6 @@ export default function App() {
       setOrigin(safeCenter);
       setOriginAddress(geo.address);
       setIsSelectingPickup(false);
-      // ✅ No abrimos nada. El BottomSheet aparece solo.
     } else if (isSelectingDestination) {
       setDestination(safeCenter);
       setDestinationAddress(geo.address);
@@ -500,7 +498,7 @@ export default function App() {
           setFlyToTarget({ ...userCoords });
           setGpsStatus('gps');
           if (isSelectingPickup || !origin) await applyOriginLocation(userCoords, false);
-          setStatusNotification('📍 Centrado');
+          setStatusNotification('Centrado');
           setTimeout(() => setStatusNotification(null), 3000);
         },
         async () => {
@@ -526,7 +524,7 @@ export default function App() {
     setUserLocation(city.coords); setFlyToTarget(city.coords);
     await applyOriginLocation(city.coords, true);
     setDestination(null); setDestinationAddress('');
-    setStatusNotification(`📍 ${city.name}`);
+    setStatusNotification(city.name);
     setTimeout(() => setStatusNotification(null), 3000);
   };
 
@@ -556,7 +554,7 @@ export default function App() {
 
     let targetDriverId: string | null = null;
     if (isSupabaseConfigured()) {
-      setStatusNotification('🔍 Buscando conductor...');
+      setStatusNotification('Buscando conductor...');
       try {
         const closest = await findClosestOnlineDriver(origin, 3.0);
         if (closest.found && closest.driver_id) targetDriverId = closest.driver_id;
@@ -597,10 +595,10 @@ export default function App() {
 
       if (dbRide) {
         newRide.id = dbRide.id;
-        setStatusNotification('✅ Solicitud enviada');
+        setStatusNotification('Solicitud enviada');
         setTimeout(() => setStatusNotification(null), 2500);
 
-        // 🗺️ GUARDAR LA RUTA CALCULADA para que el conductor la use igual
+        // Guardar la ruta calculada para que el conductor la use igual
         if (routeCoords.length >= 2) {
           saveRideRoute(
             dbRide.id,
@@ -611,82 +609,71 @@ export default function App() {
           ).catch(err => console.warn('Error guardando ruta:', err));
         }
 
- 
-if (rideSubRef.current) rideSubRef.current();
-const unsub = subscribeToRideChanges(dbRide.id, (updatedRide, driverInfo, newViewedDrivers) => {
-  if (newViewedDrivers) setViewedDrivers(newViewedDrivers);
+        if (rideSubRef.current) rideSubRef.current();
+        const unsub = subscribeToRideChanges(dbRide.id, (updatedRide, driverInfo, newViewedDrivers) => {
+          if (newViewedDrivers) setViewedDrivers(newViewedDrivers);
 
-  const status = updatedRide.status;
-  const isDriverActive =
-    status === 'aceptado' ||
-    status === 'en_camino' ||
-    status === 'llegado_origen' ||
-    status === 'en_curso';
+          const status = updatedRide.status;
+          const isDriverActive =
+            status === 'aceptado' ||
+            status === 'en_camino' ||
+            status === 'llegado_origen' ||
+            status === 'en_curso';
 
-  // ═══════════════════════════════════════════════════════════
-  // 🔄 SIEMPRE actualizar la ubicación del conductor mientras
-  //    el viaje esté activo (aceptado / en_camino / llegado / en_curso)
-  //    Así la moto se mueve en el mapa en tiempo real.
-  // ═══════════════════════════════════════════════════════════
-  if (isDriverActive) {
-    const dLat = Number(driverInfo?.lat);
-    const dLng = Number(driverInfo?.lng);
-    const hasRealLoc =
-      !isNaN(dLat) && isFinite(dLat) &&
-      !isNaN(dLng) && isFinite(dLng) &&
-      dLat !== 0 && dLng !== 0;
+          // 🔄 Siempre actualizar la ubicación del conductor mientras el viaje esté activo
+          if (isDriverActive) {
+            const dLat = Number(driverInfo?.lat);
+            const dLng = Number(driverInfo?.lng);
+            const hasRealLoc =
+              !isNaN(dLat) && isFinite(dLat) &&
+              !isNaN(dLng) && isFinite(dLng) &&
+              dLat !== 0 && dLng !== 0;
 
-    setAssignedDriver(prev => {
-      const mapped: Driver = {
-        id: driverInfo?.id || updatedRide.driver_id || prev?.id || 'drv-assigned',
-        name: driverInfo?.full_name || prev?.name || 'Conductor',
-        rating: prev?.rating ?? 5.0,
-        ridesCount: prev?.ridesCount ?? 150,
-        vehicle: driverInfo?.vehicle_model || prev?.vehicle || 'Motocicleta',
-        plate: driverInfo?.vehicle_plate || prev?.plate || 'SCZ',
-        phone: driverInfo?.phone || prev?.phone || '',
-        currentLocation: hasRealLoc
-          ? { lat: dLat, lng: dLng }
-          : (prev?.currentLocation || origin || DEFAULT_CENTER),
-        photoUrl: driverInfo?.avatar_url || prev?.photoUrl ||
-          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
-      };
-      return mapped;
-    });
+            setAssignedDriver(prev => {
+              const mapped: Driver = {
+                id: driverInfo?.id || updatedRide.driver_id || prev?.id || 'drv-assigned',
+                name: driverInfo?.full_name || prev?.name || 'Conductor',
+                rating: prev?.rating ?? 5.0,
+                ridesCount: prev?.ridesCount ?? 150,
+                vehicle: driverInfo?.vehicle_model || prev?.vehicle || 'Motocicleta',
+                plate: driverInfo?.vehicle_plate || prev?.plate || 'SCZ',
+                phone: driverInfo?.phone || prev?.phone || '',
+                currentLocation: hasRealLoc
+                  ? { lat: dLat, lng: dLng }
+                  : (prev?.currentLocation || origin || DEFAULT_CENTER),
+                photoUrl: driverInfo?.avatar_url || prev?.photoUrl ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
+              };
+              return mapped;
+            });
 
-    // Actualizar ubicación SOLO si llegó nueva data GPS válida
-    if (hasRealLoc) {
-      setDriverLocation({ lat: dLat, lng: dLng });
+            if (hasRealLoc) {
+              setDriverLocation({ lat: dLat, lng: dLng });
 
-      // Mientras el conductor va al origen → recalcular ruta conductor → origen
-      if ((status === 'aceptado' || status === 'en_camino' || status === 'llegado_origen') && origin) {
-        calculateRoute({ lat: dLat, lng: dLng }, origin).then(r => {
-          setDriverRouteCoords(r.coordinates);
-          setDriverDistanceMeters(Math.max(50, Math.round(r.distanceKm * 1000)));
-          setEtaMinutes(Math.max(1, r.durationMinutes));
-        }).catch(() => {});
-      }
-      // En curso → la ruta mostrada es la del viaje (routeCoords), no se recalcula aquí
-    }
-  }
+              if ((status === 'aceptado' || status === 'en_camino' || status === 'llegado_origen') && origin) {
+                calculateRoute({ lat: dLat, lng: dLng }, origin).then(r => {
+                  setDriverRouteCoords(r.coordinates);
+                  setDriverDistanceMeters(Math.max(50, Math.round(r.distanceKm * 1000)));
+                  setEtaMinutes(Math.max(1, r.durationMinutes));
+                }).catch(() => {});
+              }
+            }
+          }
 
-  // ═══════════════════════════════════════════════════════════
-  // 🚦 Actualizar SOLO el estado del ride (sin cortar el flujo)
-  // ═══════════════════════════════════════════════════════════
-  if (status === 'aceptado') {
-    setRideStatus(prev => (prev === 'solicitando' || prev === 'asignado') ? 'en_camino' : prev);
-  } else if (status === 'llegado_origen') {
-    setRideStatus('llegado_origen');
-  } else if (status === 'en_curso') {
-    setRideStatus('en_curso');
-  } else if (status === 'completado') {
-    handleCompleteRide();
-  } else if (status === 'cancelado' || status === 'no_completado') {
-    handleCancelRide();
-  }
-});
-rideSubRef.current = unsub;
-
+          // 🚦 Actualizar SOLO el estado del ride
+          if (status === 'aceptado') {
+            setRideStatus(prev => (prev === 'solicitando' || prev === 'asignado') ? 'en_camino' : prev);
+          } else if (status === 'llegado_origen') {
+            setRideStatus('llegado_origen');
+          } else if (status === 'en_curso') {
+            setRideStatus('en_curso');
+          } else if (status === 'completado') {
+            handleCompleteRide();
+          } else if (status === 'cancelado' || status === 'no_completado') {
+            handleCancelRide();
+          }
+        });
+        rideSubRef.current = unsub;
       }
     }
 
@@ -712,15 +699,83 @@ rideSubRef.current = unsub;
     setTimeout(() => setStatusNotification(null), 2500);
   };
 
+  // ═══════════════════════════════════════════════════════════════
+  //  ✅ CONDUCTOR COMPLETÓ EL VIAJE
+  //  Limpiar datos visuales del conductor (ya llegó a destino)
+  // ═══════════════════════════════════════════════════════════════
   const handleCompleteRide = () => {
+    // 🧹 Limpiar datos visuales del conductor (ya llegó al destino)
     setDriverRouteCoords([]);
     setDriverDistanceMeters(0);
-    if (rideSubRef.current) { rideSubRef.current(); rideSubRef.current = null; }
+    setViewedDrivers([]);
+
+    // Desuscribir de cambios del ride (ya no hace falta)
+    if (rideSubRef.current) {
+      rideSubRef.current();
+      rideSubRef.current = null;
+    }
+
     setRideStatus('completado');
     setPanelExpanded(false);
     setIsPaymentOpen(true);
   };
 
+  // ═══════════════════════════════════════════════════════════════
+  //  🧹 LIMPIEZA VISUAL DEL MAPA
+  //  Se llama al confirmar el pago. Deja el mapa 100% limpio
+  //  mientras el modal de rating sigue visible encima.
+  // ═══════════════════════════════════════════════════════════════
+  const clearMapAfterRide = useCallback(() => {
+    // 1. Limpiar ruta dibujada del viaje
+    setRouteCoords([]);
+    setDistanceKm(0);
+    setDurationMins(0);
+    setRouteSummary('Ruta calculada en tiempo real');
+
+    // 2. Limpiar destino
+    setDestination(null);
+    setDestinationAddress('');
+
+    // 3. El origen pasa a ser la ubicación actual del pasajero (donde bajó)
+    if (userLocation) {
+      setOrigin(userLocation);
+      reverseGeocode(userLocation.lat, userLocation.lng)
+        .then(geo => { setOriginAddress(geo.address); })
+        .catch(() => { setOriginAddress('Mi ubicación actual'); });
+    } else {
+      setOrigin(null);
+      setOriginAddress('');
+    }
+
+    // 4. Limpiar datos visuales del conductor en el mapa
+    setDriverLocation(null);
+    setDriverRouteCoords([]);
+    setDriverDistanceMeters(0);
+    setViewedDrivers([]);
+    setEtaMinutes(3);
+
+    // 5. Resetear carga (era del viaje anterior)
+    setHasCargo(false);
+    setCargoDescription('');
+    setCargoPhotoUrl(null);
+    setCargoPhotoFile(null);
+
+    // 6. Colapsar el panel inferior
+    setPanelExpanded(false);
+
+    // 7. Desuscribir de cambios del ride (por seguridad)
+    if (rideSubRef.current) {
+      rideSubRef.current();
+      rideSubRef.current = null;
+    }
+
+    console.log('🧹 [clearMapAfterRide] Mapa del pasajero limpiado');
+  }, [userLocation]);
+
+  // ═══════════════════════════════════════════════════════════════
+  //  💳 CONFIRMAR PAGO
+  //  El conductor ya recibió el pago → limpiar el mapa INMEDIATAMENTE
+  // ═══════════════════════════════════════════════════════════════
   const handleConfirmPayment = (method: 'qr' | 'efectivo') => {
     setIsPaymentOpen(false);
     if (activeRide) {
@@ -728,17 +783,34 @@ rideSubRef.current = unsub;
       setHistory(updatedHistory);
       try { localStorage.setItem('motocampeon_history', JSON.stringify(updatedHistory)); } catch {}
     }
+
+    // 🧹 LIMPIEZA INMEDIATA — antes de abrir el rating
+    // El conductor ya recibió el pago, ya no necesitamos la ruta
+    clearMapAfterRide();
+
     setIsRatingOpen(true);
   };
 
+  // ═══════════════════════════════════════════════════════════════
+  //  ⭐ CALIFICAR AL CONDUCTOR
+  //  El mapa ya quedó limpio en handleConfirmPayment
+  // ═══════════════════════════════════════════════════════════════
   const handleSubmitRating = async (rating: number) => {
     setIsRatingOpen(false);
     if (activeRide && assignedDriver && isSupabaseConfigured()) {
       await submitDriverRating(activeRide.id, assignedDriver.id, currentPassenger?.id || null, rating);
     }
-    setActiveRide(null); setAssignedDriver(null); setViewedDrivers([]);
-    setRideStatus('draft'); setHasCargo(false); setCargoDescription('');
-    setCargoPhotoUrl(null); setCargoPhotoFile(null);
+    // Limpieza final del estado del viaje
+    // (el mapa ya quedó limpio en handleConfirmPayment)
+    setActiveRide(null);
+    setAssignedDriver(null);
+    setViewedDrivers([]);
+    setRideStatus('draft');
+    setPanelExpanded(false);
+    setHasCargo(false);
+    setCargoDescription('');
+    setCargoPhotoUrl(null);
+    setCargoPhotoFile(null);
   };
 
   const handleRepeatRide = (ride: RideRequest) => {
@@ -872,12 +944,6 @@ rideSubRef.current = unsub;
         />
       )}
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* 🎯 SEARCH OVERLAY                                          */}
-      {/* ✅ CAMBIO: Al elegir ORIGEN ya NO se abre el buscador de   */}
-      {/*    destino automáticamente. El usuario decide si quiere    */}
-      {/*    buscar por texto tocando la lupa o el campo destino.    */}
-      {/* ═══════════════════════════════════════════════════════════ */}
       <SearchOverlay
         isOpen={isSearchOpen}
         isPickingOrigin={isPickingOriginInSearch}
@@ -891,15 +957,14 @@ rideSubRef.current = unsub;
           const targetCoords = { lat, lng };
 
           if (isPickingOriginInSearch) {
-            // 🟢 Era ORIGEN → guardar y cerrar (SIN forzar destino)
+            // Era ORIGEN → guardar y cerrar (sin forzar destino)
             setOrigin(targetCoords);
             setOriginAddress(`${loc.name}, ${loc.address}`);
             setFlyToTarget(targetCoords);
             addRecentSearch({ ...loc, lat, lng });
             setIsSearchOpen(false);
-            // ✅ NO abrimos el buscador de destino. El BottomSheet aparece solo.
           } else {
-            // 🟠 Era DESTINO → guardar y cerrar
+            // Era DESTINO → guardar y cerrar
             setDestination(targetCoords);
             setDestinationAddress(`${loc.name}, ${loc.address}`);
             setFlyToTarget(targetCoords);
@@ -969,11 +1034,6 @@ rideSubRef.current = unsub;
         localHistory={history}
       />
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* MODAL DE ACEPTACIÓN DE POLÍTICA DE PRIVACIDAD              */}
-      {/* Bloquea la app hasta que el usuario acepte la política.    */}
-      {/* Aparece solo la primera vez que se abre la app.            */}
-      {/* ═══════════════════════════════════════════════════════════ */}
       <PolicyModal
         isOpen={!policyAccepted}
         onAccept={() => {
