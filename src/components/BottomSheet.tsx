@@ -94,8 +94,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
 
   // ═══════════════════════════════════════════════════════════════
   //  ESTADO 1: SIN RUTA COMPLETA
-  //  Diseño limpio con 2 botones claros: Buscar dirección / Fijar en mapa
-  //  NO abre nada automáticamente.
+  //  Origen clickeable para poder cambiarlo en cualquier momento
   // ═══════════════════════════════════════════════════════════════
   if (!hasBothPoints) {
     const hasOrigin = Boolean(origin);
@@ -106,20 +105,37 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
                       animate-in slide-in-from-bottom-4 fade-in duration-300 ease-out">
         <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto mb-1" />
 
-        {/* Origen actual (solo lectura, no interactivo) */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex items-start gap-3">
+        {/* ═══════════════════════════════════════════════════════════════
+            ORIGEN — Ahora CLICKEABLE para poder cambiarlo
+            Al tocarlo abre el buscador en modo "origen"
+            ═══════════════════════════════════════════════════════════════ */}
+        <button
+          type="button"
+          onClick={() => onOpenSearch(true)}
+          className="w-full bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-emerald-500/50 rounded-2xl p-3 flex items-start gap-3 transition text-left active:scale-[0.98]"
+        >
           <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0 mt-0.5">
             <MapPin className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-              {needsOrigin ? 'Punto de partida' : 'Recogida'}
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                {needsOrigin ? 'Punto de partida' : 'Recogida'}
+              </div>
+              {hasOrigin && (
+                <span className="text-[10px] font-bold text-amber-400 flex items-center gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+                  </svg>
+                  Cambiar
+                </span>
+              )}
             </div>
-            <div className="text-sm font-semibold text-slate-100 truncate mt-0.5">
-              {originAddress || 'Aún sin definir'}
+            <div className={`text-sm font-semibold truncate mt-0.5 ${hasOrigin ? 'text-slate-100' : 'text-slate-400'}`}>
+              {originAddress || 'Toca para elegir...'}
             </div>
           </div>
-        </div>
+        </button>
 
         {/* Título */}
         <div className="text-center pt-1 pb-0.5">
@@ -131,10 +147,10 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
           </div>
         </div>
 
-        {/* 2 botones grandes, uno por método */}
+        {/* 2 botones grandes para DESTINO */}
         <div className="grid grid-cols-2 gap-2.5">
           <button
-            onClick={() => onOpenSearch(needsOrigin)}
+            onClick={() => onOpenSearch(false)}
             className="py-4 px-3 rounded-2xl
                        bg-gradient-to-br from-amber-500 to-orange-500
                        hover:from-amber-400 hover:to-orange-400
@@ -144,12 +160,12 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
                        shadow-lg shadow-amber-500/25"
           >
             <Search className="w-5 h-5" />
-            <span className="leading-tight">Buscar dirección</span>
+            <span className="leading-tight">Buscar destino</span>
           </button>
 
           {onPickOnMap && (
             <button
-              onClick={() => onPickOnMap(needsOrigin)}
+              onClick={() => onPickOnMap(false)}
               className="py-4 px-3 rounded-2xl
                          bg-slate-800 hover:bg-slate-750
                          text-slate-200 font-bold text-xs
@@ -158,10 +174,22 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
                          border border-slate-700 hover:border-amber-500/50"
             >
               <MapPinned className="w-5 h-5 text-amber-400" />
-              <span className="leading-tight">Fijar en el mapa</span>
+              <span className="leading-tight">Fijar destino en mapa</span>
             </button>
           )}
         </div>
+
+        {/* 🆕 Botón secundario para reubicar el origen en el mapa (si ya hay origen) */}
+        {hasOrigin && onPickOnMap && (
+          <button
+            type="button"
+            onClick={() => onPickOnMap(true)}
+            className="w-full py-2.5 rounded-xl bg-slate-900/60 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-emerald-400 text-[11px] font-bold flex items-center justify-center gap-2 transition"
+          >
+            <MapPin className="w-3.5 h-3.5" />
+            Ubicar mi recogida en el mapa
+          </button>
+        )}
       </div>
     );
   }
