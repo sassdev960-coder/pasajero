@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import { LatLng, MapTileLayer, Driver, SupabaseDriver, DriverViewInfo } from '../types';
-import { Layers, Crosshair, MapPin, Maximize2, Bike } from 'lucide-react';
+import { Layers, Crosshair, MapPin, Maximize2, Bike, Navigation, NavigationOff } from 'lucide-react';
 
 interface MapComponentProps {
   origin: LatLng | null;
@@ -56,9 +56,9 @@ const TILE_LAYERS: Record<MapTileLayer, { url: string; attribution: string; name
 };
 
 const isValidNum = (v: any): v is number => typeof v === 'number' && !isNaN(v) && isFinite(v);
-const isValidLoc = (loc: any): loc is LatLng => 
+const isValidLoc = (loc: any): loc is LatLng =>
   loc != null && isValidNum(loc.lat) && isValidNum(loc.lng) && loc.lat >= -90 && loc.lat <= 90 && loc.lng >= -180 && loc.lng <= 180;
-const isValidTuple = (c: any): c is [number, number] => 
+const isValidTuple = (c: any): c is [number, number] =>
   Array.isArray(c) && c.length >= 2 && isValidNum(c[0]) && isValidNum(c[1]);
 
 export const MapComponent: React.FC<MapComponentProps> = ({
@@ -89,7 +89,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
-  
+
   const userLocationMarkerRef = useRef<L.Marker | null>(null);
   const userCircleRef = useRef<L.Circle | null>(null);
   const originMarkerRef = useRef<L.Marker | null>(null);
@@ -107,6 +107,25 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   const [currentLayer, setCurrentLayer] = useState<MapTileLayer>('google-roads');
   const [showLayerMenu, setShowLayerMenu] = useState(false);
 
+  // ═══════════════════════════════════════════════════════════════
+  //  🎥 AUTO-FOLLOW — Seguimiento en vivo del conductor/pasajero
+  // ═══════════════════════════════════════════════════════════════
+  const [followEnabled, setFollowEnabled] = useState(true);
+
+  const isRideActive =
+    rideStatus === 'aceptado' ||
+    rideStatus === 'en_camino' ||
+    rideStatus === 'llegado_origen' ||
+    rideStatus === 'en_curso';
+
+  const isFollowingDriver =
+    rideStatus === 'aceptado' ||
+    rideStatus === 'en_camino' ||
+    rideStatus === 'llegado_origen';
+
+  const isFollowingPassenger = rideStatus === 'en_curso';
+
+  // ── Init del mapa ──
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
@@ -158,6 +177,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     };
   }, []);
 
+  // ── Cambio de capa de tiles ──
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
@@ -172,12 +192,16 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     tileLayerRef.current = newLayer;
   }, [currentLayer]);
 
+  // ── FlyTo manual (para gestos puntuales) ──
   useEffect(() => {
     if (!mapInstanceRef.current || !flyToTarget) return;
     if (!isValidLoc(flyToTarget)) return;
+    // No interferir con auto-follow activo
+    if (isRideActive && followEnabled) return;
     mapInstanceRef.current.flyTo([flyToTarget.lat, flyToTarget.lng], 16, { animate: true, duration: 1.2 });
-  }, [flyToTarget]);
+  }, [flyToTarget, isRideActive, followEnabled]);
 
+  // ── Marcador del usuario ──
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
@@ -214,6 +238,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     }
   }, [userLocation]);
 
+  // ── Marcador de origen ──
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
@@ -232,6 +257,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     else originMarkerRef.current = L.marker([origin.lat, origin.lng], { icon, zIndexOffset: 1000 }).addTo(map);
   }, [origin]);
 
+  // ── Marcador de destino ──
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
@@ -250,6 +276,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     else destMarkerRef.current = L.marker([destination.lat, destination.lng], { icon, zIndexOffset: 1000 }).addTo(map);
   }, [destination]);
 
+  // ── Ruta del viaje ──
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
@@ -272,7 +299,6 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       color: '#06b6d4', weight: 5, opacity: 0.95, lineCap: 'round', lineJoin: 'round'
     }).addTo(map);
 
-    // Badge de ETA en midpoint (opcional, sutil)
     if (durationMins && distanceKm) {
       const midPoint = latLngs[Math.floor(latLngs.length / 2)] as [number, number];
       if (isValidTuple(midPoint)) {
@@ -299,6 +325,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     }
   }, [routeCoords, distanceKm, durationMins, isSelectingPickup, isSelectingDestination, isSheetMinimized, rideStatus]);
 
+  // ── Ruta conductor → origen ──
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
@@ -321,6 +348,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     }).addTo(map);
   }, [driverRouteCoords, driverDistanceMeters]);
 
+  // ── Marcador del conductor (con inicial en vez de emoji) ──
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
@@ -332,7 +360,14 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     const driverHtml = `
       <div class="relative flex flex-col items-center select-none">
         <div class="absolute -top-1 w-10 h-10 rounded-full bg-amber-400/35 animate-ping"></div>
-        <div class="w-9 h-9 rounded-full bg-amber-500 border-2 border-slate-900 shadow-2xl flex items-center justify-center text-slate-950 font-black text-sm z-10">🏍️</div>
+        <div class="w-9 h-9 rounded-full bg-amber-500 border-2 border-slate-900 shadow-2xl flex items-center justify-center text-slate-950 z-10">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="18.5" cy="17.5" r="3.5"/>
+            <circle cx="5.5" cy="17.5" r="3.5"/>
+            <circle cx="15" cy="5" r="1"/>
+            <path d="M12 17.5V14l-3-3 4-3 2 3h2"/>
+          </svg>
+        </div>
       </div>
     `;
     const icon = L.divIcon({ html: driverHtml, className: 'custom-driver-marker', iconSize: [60, 40], iconAnchor: [30, 18] });
@@ -344,6 +379,39 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       driverMarkerRef.current = L.marker([driverLocation.lat, driverLocation.lng], { icon, zIndexOffset: 1200 }).addTo(map);
     }
   }, [driverLocation, assignedDriver]);
+
+  // ═══════════════════════════════════════════════════════════════
+  //  🎥 AUTO-FOLLOW — efecto
+  //  Se activa/desactiva al hacer drag el usuario
+  // ═══════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+    const onDragStart = () => setFollowEnabled(false);
+    map.on('dragstart', onDragStart);
+    return () => { map.off('dragstart', onDragStart); };
+  }, []);
+
+  // Reactivar follow cuando cambia el estado a uno activo
+  useEffect(() => {
+    if (isRideActive) setFollowEnabled(true);
+  }, [rideStatus]);
+
+  // Mover la cámara cada vez que se actualiza el target
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    if (!followEnabled) return;
+    if (isSelectingPickup || isSelectingDestination) return;
+    const map = mapInstanceRef.current;
+
+    let target: LatLng | null = null;
+    if (isFollowingDriver && driverLocation && isValidLoc(driverLocation)) target = driverLocation;
+    else if (isFollowingPassenger && userLocation && isValidLoc(userLocation)) target = userLocation;
+
+    if (target) {
+      map.panTo([target.lat, target.lng], { animate: true, duration: 0.9, easeLinearity: 0.25 });
+    }
+  }, [followEnabled, rideStatus, driverLocation, userLocation, isSelectingPickup, isSelectingDestination, isFollowingDriver, isFollowingPassenger]);
 
   const handleCenterFullRoute = useCallback(() => {
     if (!mapInstanceRef.current || !Array.isArray(routeCoords)) return;
@@ -359,6 +427,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         maxZoom: 16
       });
     }
+    setFollowEnabled(false);
   }, [routeCoords, isSheetMinimized]);
 
   const handleCenterDriver = useCallback(() => {
@@ -379,7 +448,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     }
   }, [driverLocation, origin]);
 
-  // ── Render conductores online con efecto "en vivo" ──
+  // ── Conductores online ──
   useEffect(() => {
     if (!mapInstanceRef.current || !onlineDriversLayerRef.current) return;
     const layerGroup = onlineDriversLayerRef.current;
@@ -397,7 +466,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         (typeof v === 'object' && v?.driver_id === driver.id)
       );
 
-      const firstName = (driver.full_name || 'Conductor').split(' ')[0];
+      const initial = (driver.full_name || 'C').charAt(0).toUpperCase();
 
       const driverHtml = `
         <div class="relative flex flex-col items-center select-none cursor-pointer group">
@@ -406,8 +475,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({
             hasViewed
               ? 'bg-amber-500 border-2 border-slate-900 shadow-amber-500/50 shadow-lg text-slate-950 scale-110'
               : 'bg-slate-900 border-2 border-emerald-400 shadow-emerald-500/30 shadow-lg text-emerald-400'
-          } flex items-center justify-center text-base font-bold transition-all duration-200 group-hover:scale-125 z-10">
-            ${hasViewed ? '👀' : '🏍️'}
+          } flex items-center justify-center text-sm font-black transition-all duration-200 group-hover:scale-125 z-10">
+            ${initial}
           </div>
         </div>
       `;
@@ -437,8 +506,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({
             </div>
           </div>
           <div style="margin-top: 6px; font-size: 11px; color: #cbd5e1; line-height: 1.4;">
-            <div>🏍️ <span style="font-weight: 600; color: #f8fafc;">${driver.vehicle_model || 'Motocicleta'}</span></div>
-            <div>🏷️ Placa: <span style="font-family: monospace; font-weight: 700; color: #fbbf24;">${driver.vehicle_plate || 'SCZ'}</span></div>
+            <div>Vehículo: <span style="font-weight: 600; color: #f8fafc;">${driver.vehicle_model || 'Motocicleta'}</span></div>
+            <div>Placa: <span style="font-family: monospace; font-weight: 700; color: #fbbf24;">${driver.vehicle_plate || 'SCZ'}</span></div>
           </div>
         </div>
       `;
@@ -475,7 +544,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center z-20 pb-16">
           <div className="bg-slate-900/95 border border-slate-700 text-white px-3.5 py-2 rounded-xl shadow-2xl flex flex-col items-center mb-2 animate-bounce max-w-[260px] text-center backdrop-blur-md">
             <span className="text-[11px] font-medium tracking-wide uppercase text-slate-400">
-              {isSelectingPickup ? '🟢 Fijar Punto de Partida' : '🟠 Fijar Punto de Destino'}
+              {isSelectingPickup ? 'Fijar Punto de Partida' : 'Fijar Punto de Destino'}
             </span>
             <span className="text-xs font-bold text-slate-100 truncate w-full">
               {isGeocodingCenter ? 'Localizando dirección...' : centerAddress}
@@ -514,8 +583,44 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         </div>
       )}
 
-      {/* Controles del mapa (compactos, sin badges flotantes) */}
+      {/* Controles del mapa */}
       <div className="absolute top-1/2 -translate-y-1/2 right-3 z-20 flex flex-col items-end gap-2.5 pointer-events-auto select-none">
+
+        {/* ═══════════════════════════════════════════════════ */}
+        {/* 🎥 BOTÓN DE SEGUIMIENTO (solo cuando hay viaje)      */}
+        {/* ═══════════════════════════════════════════════════ */}
+        {isRideActive && (
+          <button
+            onClick={() => setFollowEnabled(prev => !prev)}
+            className={`group relative flex flex-col items-center justify-center w-12 h-12 rounded-2xl shadow-2xl backdrop-blur-md transition-all active:scale-95 ${
+              followEnabled
+                ? 'bg-emerald-500 border-2 border-emerald-300 text-slate-950'
+                : 'bg-slate-900/95 border-2 border-slate-500 text-slate-300'
+            }`}
+            title={followEnabled ? 'Siguiendo en vivo — toca para pausar' : 'Seguimiento pausado — toca para reanudar'}
+          >
+            {followEnabled ? (
+              <>
+                <Navigation className="w-5 h-5 fill-slate-950" />
+                <span className="text-[8px] font-black uppercase leading-none mt-0.5">
+                  En vivo
+                </span>
+                <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white" />
+                </span>
+              </>
+            ) : (
+              <>
+                <NavigationOff className="w-5 h-5" />
+                <span className="text-[8px] font-black uppercase leading-none mt-0.5">
+                  Pausa
+                </span>
+              </>
+            )}
+          </button>
+        )}
+
         {/* GPS */}
         <button
           onClick={onLocateUser}
@@ -584,7 +689,7 @@ export const MapComponent: React.FC<MapComponentProps> = ({
             className="group relative flex flex-col items-center justify-center w-12 h-12 rounded-2xl bg-slate-900/95 text-white border-2 border-emerald-500/70 shadow-2xl backdrop-blur-md transition-all active:scale-95"
             title="Ver motos en línea"
           >
-            <span className="text-base leading-none">🏍️</span>
+            <Bike className="w-5 h-5 text-emerald-400" />
             <span className="text-[9px] font-black text-emerald-400 leading-none mt-0.5">{onlineDrivers.length}</span>
           </button>
         )}
@@ -593,8 +698,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({
         {driverLocation && (
           <button
             onClick={handleCenterDriver}
-            className="group relative flex items-center justify-center w-12 h-12 rounded-2xl bg-slate-900/95 text-white border-2 border-amber-500/70 shadow-2xl backdrop-blur-md transition-all active:scale-95 animate-pulse"
-            title="Ver conductor"
+            className="group relative flex items-center justify-center w-12 h-12 rounded-2xl bg-slate-900/95 text-white border-2 border-amber-500/70 shadow-2xl backdrop-blur-md transition-all active:scale-95"
+            title="Centrar conductor y origen"
           >
             <Bike className="w-6 h-6 text-amber-400" />
           </button>
