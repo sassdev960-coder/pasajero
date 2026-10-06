@@ -611,44 +611,82 @@ export default function App() {
           ).catch(err => console.warn('Error guardando ruta:', err));
         }
 
-        if (rideSubRef.current) rideSubRef.current();
-        const unsub = subscribeToRideChanges(dbRide.id, (updatedRide, driverInfo, newViewedDrivers) => {
-          if (newViewedDrivers) setViewedDrivers(newViewedDrivers);
-          if (updatedRide.status === 'aceptado') {
-            setRideStatus(prev => {
-              if (prev !== 'solicitando' && prev !== 'asignado') return prev;
-              const dLat = Number(driverInfo?.lat);
-              const dLng = Number(driverInfo?.lng);
-              const hasRealLoc = !isNaN(dLat) && isFinite(dLat) && !isNaN(dLng) && isFinite(dLng) && dLat !== 0 && dLng !== 0;
-              const mappedDriver: Driver = {
-                id: driverInfo?.id || updatedRide.driver_id || 'drv-assigned',
-                name: driverInfo?.full_name || 'Conductor',
-                rating: 5.0, ridesCount: 150,
-                vehicle: driverInfo?.vehicle_model || 'Motocicleta',
-                plate: driverInfo?.vehicle_plate || 'SCZ',
-                phone: driverInfo?.phone || '',
-                currentLocation: hasRealLoc ? { lat: dLat, lng: dLng } : (origin || DEFAULT_CENTER),
-                photoUrl: driverInfo?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
-              };
-              setAssignedDriver(mappedDriver);
-              if (hasRealLoc) {
-                setDriverLocation({ lat: dLat, lng: dLng });
-                if (origin) {
-                  calculateRoute({ lat: dLat, lng: dLng }, origin).then(r => {
-                    setDriverRouteCoords(r.coordinates);
-                    setDriverDistanceMeters(Math.max(50, Math.round(r.distanceKm * 1000)));
-                    setEtaMinutes(Math.max(1, r.durationMinutes));
-                  }).catch(() => {});
-                }
-              }
-              return 'en_camino';
-            });
-          } else if (updatedRide.status === 'llegado_origen') setRideStatus('llegado_origen');
-          else if (updatedRide.status === 'en_curso') setRideStatus('en_curso');
-          else if (updatedRide.status === 'completado') handleCompleteRide();
-          else if (updatedRide.status === 'cancelado' || updatedRide.status === 'no_completado') handleCancelRide();
-        });
-        rideSubRef.current = unsub;
+ 
+if (rideSubRef.current) rideSubRef.current();
+const unsub = subscribeToRideChanges(dbRide.id, (updatedRide, driverInfo, newViewedDrivers) => {
+  if (newViewedDrivers) setViewedDrivers(newViewedDrivers);
+
+  const status = updatedRide.status;
+  const isDriverActive =
+    status === 'aceptado' ||
+    status === 'en_camino' ||
+    status === 'llegado_origen' ||
+    status === 'en_curso';
+
+  // ═══════════════════════════════════════════════════════════
+  // 🔄 SIEMPRE actualizar la ubicación del conductor mientras
+  //    el viaje esté activo (aceptado / en_camino / llegado / en_curso)
+  //    Así la moto se mueve en el mapa en tiempo real.
+  // ═══════════════════════════════════════════════════════════
+  if (isDriverActive) {
+    const dLat = Number(driverInfo?.lat);
+    const dLng = Number(driverInfo?.lng);
+    const hasRealLoc =
+      !isNaN(dLat) && isFinite(dLat) &&
+      !isNaN(dLng) && isFinite(dLng) &&
+      dLat !== 0 && dLng !== 0;
+
+    setAssignedDriver(prev => {
+      const mapped: Driver = {
+        id: driverInfo?.id || updatedRide.driver_id || prev?.id || 'drv-assigned',
+        name: driverInfo?.full_name || prev?.name || 'Conductor',
+        rating: prev?.rating ?? 5.0,
+        ridesCount: prev?.ridesCount ?? 150,
+        vehicle: driverInfo?.vehicle_model || prev?.vehicle || 'Motocicleta',
+        plate: driverInfo?.vehicle_plate || prev?.plate || 'SCZ',
+        phone: driverInfo?.phone || prev?.phone || '',
+        currentLocation: hasRealLoc
+          ? { lat: dLat, lng: dLng }
+          : (prev?.currentLocation || origin || DEFAULT_CENTER),
+        photoUrl: driverInfo?.avatar_url || prev?.photoUrl ||
+          'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
+      };
+      return mapped;
+    });
+
+    // Actualizar ubicación SOLO si llegó nueva data GPS válida
+    if (hasRealLoc) {
+      setDriverLocation({ lat: dLat, lng: dLng });
+
+      // Mientras el conductor va al origen → recalcular ruta conductor → origen
+      if ((status === 'aceptado' || status === 'en_camino' || status === 'llegado_origen') && origin) {
+        calculateRoute({ lat: dLat, lng: dLng }, origin).then(r => {
+          setDriverRouteCoords(r.coordinates);
+          setDriverDistanceMeters(Math.max(50, Math.round(r.distanceKm * 1000)));
+          setEtaMinutes(Math.max(1, r.durationMinutes));
+        }).catch(() => {});
+      }
+      // En curso → la ruta mostrada es la del viaje (routeCoords), no se recalcula aquí
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🚦 Actualizar SOLO el estado del ride (sin cortar el flujo)
+  // ═══════════════════════════════════════════════════════════
+  if (status === 'aceptado') {
+    setRideStatus(prev => (prev === 'solicitando' || prev === 'asignado') ? 'en_camino' : prev);
+  } else if (status === 'llegado_origen') {
+    setRideStatus('llegado_origen');
+  } else if (status === 'en_curso') {
+    setRideStatus('en_curso');
+  } else if (status === 'completado') {
+    handleCompleteRide();
+  } else if (status === 'cancelado' || status === 'no_completado') {
+    handleCancelRide();
+  }
+});
+rideSubRef.current = unsub;
+
       }
     }
 
